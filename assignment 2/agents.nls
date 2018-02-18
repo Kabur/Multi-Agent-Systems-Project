@@ -46,6 +46,9 @@ end
 
 to drop-and-pick [cur_bs_stop cur_bs_passengers cur_bs_id capacity]
   
+  ; current number of passengers
+  let n_passengers length cur_bs_passengers
+  
   ; get passengers waiting at current bus stop
   let waiting_passengers get-passengers-at-stop cur_bs_stop
    
@@ -59,8 +62,9 @@ to drop-and-pick [cur_bs_stop cur_bs_passengers cur_bs_id capacity]
   ; then get people that are waiting
   foreach waiting_passengers [
     
-    if length cur_bs_passengers < capacity [
+    if n_passengers < capacity [
       pick-up-passenger item 0 ?
+      set n_passengers n_passengers + 1
     ] 
   ]
 end
