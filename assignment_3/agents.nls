@@ -1,0 +1,186 @@
+buses-own [
+  ; Static, read-only variables. These values never change. You can read them, but you cannot change them.
+  bus_id          ; The ID of a given agent (bus). Each agent has a unique ID.
+  bus_type        ; The type of a given agent (bus). 1 means "small", 2 means "medium" and 3 means "large".
+    
+  ; Dynamic, read-only variables. These values may change over time. You can read them, but you cannot change them.
+  inbox           ; List containing all the incoming messages (a given message is a list like this [tick sender message]).
+  bus_passengers  ; List containing all the passengers that the agent (bus) is currently carrying (represented as a list like this [passenger_id bus_stop]).
+  previous_stop   ; ID of the last bus stop that the agent (bus) visited (-1 means that the agent has not visited any bus stop yet).
+  current_stop    ; ID of the bus stop where the agent (bus) currently is (-1 means that the agent is not at any bus stop).
+  next_stop       ; ID of the bus stop the agent (bus) is traveling to (-1 means that the agent is not travelling to any bus stop).
+
+  ; New local variables for students.
+  ; You can create any new local variable you want. Just declare them here.
+  beliefs
+  spawn_count
+  route_counter
+  route_type
+]
+ 
+globals [graph counter]
+
+to init-buses
+  ; Initialize your agents here.
+  ; This list contains the topology of the entire network of bus stops, which is known to all agents. You can use this, for instance, to calculate the shortest path between two bus stops.
+  set graph [[22 15 14] [11 19 23 7] [8] [16 4 20 9] [3 5 10] [4 16 10 17] [8] [1 17 13] [2 6 9] [3 8 20] [4 5 17 13 21] [1 16 17] [20 15 22] [7 10 22 23] [0 23] [0 12 18] [3 5 11] [5 7 10 11] [15] [1 23] [3 9 12 21] [10 20 22] [0 12 13 21] [1 13 14 19]]
+  
+  ; initialize counters for route and spawn timing
+  set route_counter 1
+  set spawn_count 50
+  
+  ; set route type (fixed means drives fixed route, freestyler means drives to where people want to go
+  ifelse bus_id mod 2 = 0 and not (bus_id = 24)[
+    set route_type "freestyler"
+  ]
+  [
+    ifelse not (bus_id = 24) [
+      set route_type "fixed"
+    ]
+    [
+      set route_type "boss"
+    ]
+  ]
+  
+end
+
+to-report get-next-stop [bus_stop]
+  
+  ; fixed route
+  let route ["Centraal" "Dam" "Centraal" "Sloterdijk" "Lelylaan" "Amstelveenseweg" "VU" "Zuid" "RAI" "Amstel" "SciencePark" "UvA" "SciencePark" "Muiderpoort" 
+  "Wibautstraat" "Museumplein" "Haarlemmermeerstation" "Surinameplein" "Evertsenstraat" "Leidseplein" "Weesperplein" "Waterlooplein" "Hendrikkade" "Hasseltweg" "Floradorp"  "Hasseltweg"  "Buikslotermeer" "Hasseltweg" "Hendrikkade"]
+  
+  ; get next stop on route and report it
+  let route_length length route
+  let bus_name item (route_counter mod route_length) route
+  let nxt position bus_name amsterdam_bus_stops_names 
+  set route_counter route_counter + 1
+  report nxt
+end
+
+
+to-report drop-and-pick [cur_bs_stop cur_bs_passengers cur_bs_id capacity]
+  
+  ; current number of passengers
+  let n_passengers length cur_bs_passengers
+  
+  ; get passengers waiting at current bus stop
+  let waiting_passengers get-passengers-at-stop cur_bs_stop
+   
+  ; drop off people who want to go out at current stop
+  foreach cur_bs_passengers [
+     if item 1 ? = cur_bs_stop [
+         drop-off-passenger item 0 ?
+     ]  
+  ]
+   
+  let still_at_stop []
+  
+  ; then get people that are waiting
+  foreach waiting_passengers [
+    
+    ifelse n_passengers < capacity [
+      pick-up-passenger item 0 ?
+      set n_passengers n_passengers + 1
+    ]
+    [
+      set still_at_stop lput ? still_at_stop
+    ] 
+  ]
+  
+  report still_at_stop
+end
+
+
+to spawn 
+  
+  ; reset spawn count
+  set spawn_count 50
+  
+  ; add big buss if necessary
+  if amount_passengers_waiting > 60 [
+    add-bus 3
+  ]
+
+end
+
+
+to-report get-capacity [bs_type]
+  
+  ; set bus capacity
+  let capacity 0
+  ifelse bs_type = 1 [
+    set capacity 12
+  ]
+  [ 
+    ifelse bs_type = 2 [
+      set capacity 60
+    ]
+    [
+      set capacity 150
+    ]
+  ]
+  report capacity
+end
+
+
+to execute-actions
+  
+  ; get capacity
+  let capacity get-capacity bus_type
+      
+  ; if we are at a bus_stop
+  ifelse current_stop >= 0 
+  [ 
+    
+    ; initialize list of people left at stop
+    let left_at_stop []
+       
+    ; drop off people and pick up people
+    set left_at_stop drop-and-pick current_stop bus_passengers bus_id capacity
+    
+    ifelse route_type = "fixed" [
+      if length left_at_stop > 0 [
+        ; send message to freestyler colleague if people left at stop
+        send-message (bus_id + 1) left_at_stop
+        show (word "------------------------------------------")
+        show (word "sending message to " )
+        show (bus_id + 1)
+        show left_at_stop
+        show (word "------------------------------------------")
+      ]
+    ]
+    [
+      if route_type = "freestyler" [
+        
+        ; read messages
+        show (word "------------------------------------------")
+        show (word "current inbox from " )
+        show bus_id
+        show inbox
+        show (word "------------------------------------------")
+      ]
+    ]
+    
+    
+    ; travel to next stop
+    travel-to (get-next-stop current_stop)
+  ]
+  [
+    
+    ; keep travelling to next stop
+    travel-to next_stop  
+  ]
+  
+  ; only have one bus spawn new busses
+  let boss 24
+  
+  ; decrement spawn count
+  set spawn_count spawn_count - 1
+  
+  ; add new buses if necessary
+  if bus_id = boss and spawn_count <= 0 [
+    spawn    
+  ]
+  
+end
