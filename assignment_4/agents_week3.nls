@@ -1,0 +1,378 @@
+buses-own [
+  ; Static, read-only variables. These values never change. You can read them, but you cannot change them.
+  bus_id          ; The ID of a given agent (bus). Each agent has a unique ID.
+  bus_type        ; The type of a given agent (bus). 1 means "small", 2 means "medium" and 3 means "large".
+    
+  ; Dynamic, read-only variables. These values may change over time. You can read them, but you cannot change them.
+  inbox           ; List containing all the incoming messages (a given message is a list like this [tick sender message]).
+  bus_passengers  ; List containing all the passengers that the agent (bus) is currently carrying (represented as a list like this [passenger_id bus_stop]).
+  previous_stop   ; ID of the last bus stop that the agent (bus) visited (-1 means that the agent has not visited any bus stop yet).
+  current_stop    ; ID of the bus stop where the agent (bus) currently is (-1 means that the agent is not at any bus stop).
+  next_stop       ; ID of the bus stop the agent (bus) is traveling to (-1 means that the agent is not travelling to any bus stop).
+
+  ; New local variables for students.
+  ; You can create any new local variable you want. Just declare them here.
+  beliefs
+  spawn_count
+  route_counter
+  route_type
+  intermediate_route
+  effective_route
+]
+ 
+globals [graph]
+
+to init-buses
+  ; Initialize your agents here.
+  ; This list contains the topology of the entire network of bus stops, which is known to all agents. You can use this, for instance, to calculate the shortest path between two bus stops.
+  set graph [[22 15 14] [11 19 23 7] [8] [16 4 20 9] [3 5 10] [4 16 10 17] [8] [1 17 13] [2 6 9] [3 8 20] [4 5 17 13 21] [1 16 17] [20 15 22] [7 10 22 23] [0 23] [0 12 18] [3 5 11] [5 7 10 11] [15] [1 23] [3 9 12 21] [10 20 22] [0 12 13 21] [1 13 14 19]]
+  
+  ; initialize counters for route and spawn timing
+  set route_counter 1
+  set spawn_count 50
+  
+  ; set route type (fixed means drives fixed route, freestyler means drives to where people want to go
+  ifelse bus_id mod 2 = 0 and not (bus_id = 24)[
+    set route_type "freestyler"
+    set intermediate_route -1
+  ]
+  [
+    ifelse not (bus_id = 24) [
+      set route_type "fixed"
+    ]
+    [
+      set route_type "boss"
+    ]
+  ]
+  
+end
+
+to-report get-next-stop [bus_stop]
+  
+  ; fixed route
+  let fixed_route ["Centraal" "Dam" "Centraal" "Sloterdijk" "Lelylaan" "Amstelveenseweg" "VU" "Zuid" "RAI" "Amstel" "SciencePark" "UvA" "SciencePark" "Muiderpoort" 
+  "Wibautstraat" "Museumplein" "Haarlemmermeerstation" "Surinameplein" "Evertsenstraat" "Leidseplein" "Weesperplein" "Waterlooplein" "Hendrikkade" "Hasseltweg" "Floradorp"  "Hasseltweg"  "Buikslotermeer" "Hasseltweg" "Hendrikkade"]
+  
+  ; get next stop on route and report it
+  let route_length length fixed_route
+  let bus_name item (route_counter mod route_length) fixed_route
+  let nxt position bus_name amsterdam_bus_stops_names 
+  set route_counter route_counter + 1
+  report nxt
+end
+
+
+to-report drop-and-pick [cur_bs_stop cur_bs_passengers cur_bs_id capacity]
+  
+  ; current number of passengers
+  let n_passengers length cur_bs_passengers
+  
+  ; get passengers waiting at current bus stop
+  let waiting_passengers get-passengers-at-stop cur_bs_stop
+   
+  ; drop off people who want to go out at current stop
+  foreach cur_bs_passengers [
+     if item 1 ? = cur_bs_stop [
+         drop-off-passenger item 0 ?
+     ]  
+  ]
+   
+  let still_at_stop []
+  
+  ; then get people that are waiting
+  foreach waiting_passengers [
+    
+    ifelse n_passengers < capacity [
+      pick-up-passenger item 0 ?
+      set n_passengers n_passengers + 1
+    ]
+    [
+      set still_at_stop lput ? still_at_stop
+    ] 
+  ]
+  
+  report still_at_stop
+end
+
+
+to spawn 
+  
+  ; reset spawn count
+  set spawn_count 50
+  
+  ; add big buss if necessary
+  if amount_passengers_waiting > 60 [
+    add-bus 3
+  ]
+
+end
+
+
+to-report get-capacity [bs_type]
+  
+  ; set bus capacity
+  let capacity 0
+  ifelse bs_type = 1 [
+    set capacity 12
+  ]
+  [ 
+    ifelse bs_type = 2 [
+      set capacity 60
+    ]
+    [
+      set capacity 150
+    ]
+  ]
+  report capacity
+end
+
+
+to-report get-route [current_id from_id closest_stops]
+  let cur_route []
+  let current_ptr from_id
+  while [not (current_ptr = current_id)] [
+    set cur_route lput current_ptr cur_route
+    set current_ptr (item current_ptr closest_stops)
+  ]
+ report reverse cur_route
+end
+
+
+to-report find-shortest-distance [distances to_check]
+  let idx -1
+  let smallest_distance 1000000
+  foreach to_check [
+    let current (item ? distances)
+    if current < smallest_distance [
+      set smallest_distance current
+      set idx ?
+    ]
+  ]
+  let found_path []
+  set found_path lput idx found_path
+  set found_path lput smallest_distance found_path
+  report found_path
+end
+
+
+to-report find-route [departure_id destinations]
+  ; DIJKSTRA
+  
+  ; initialize list of visited and unvisited vertices
+  let visited []
+  let unvisited [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23]
+  
+  ; list of all vertices in map
+  let vertices [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23]
+  
+  ; initialize list for keeping track of previous stops and shortest path lengths
+  let previous_stops []
+  let path_lengths []
+  
+  ; initialize path_lengths to infinity except for current (departure_id)
+  foreach vertices [
+    set previous_stops lput -1 previous_stops
+    ifelse not (? = departure_id) [
+      set path_lengths lput 1000000 path_lengths
+    ]
+    [
+      set path_lengths lput 0 path_lengths 
+    ]
+  ]
+
+  ; find adjenct to current vertices and find which one is the closest
+  let adjacent_to_current item departure_id graph
+  let closest find-shortest-distance path_lengths unvisited
+  let closest_stop (item 0 closest)
+  let closest_distance (item 1 closest)
+  
+  ; while (one of the) desired destinations is not visited
+  while [not (member? closest_stop destinations)] [
+   
+    ; find adjacent to current vertex 
+    let adjacent_to_closest item closest_stop graph
+    
+    ; loop over neighbors
+    foreach adjacent_to_closest [
+      
+      ; calculate total distance to that neighbor
+      let current_neighbor ?
+      let dist_to_neighbor get-distance closest_stop current_neighbor
+      set dist_to_neighbor dist_to_neighbor + closest_distance
+      
+      ; if it is smaller than current shortest path, update shortest path and update previous stop
+      if dist_to_neighbor < (item current_neighbor path_lengths) [
+        set path_lengths replace-item current_neighbor path_lengths dist_to_neighbor
+        set previous_stops replace-item current_neighbor previous_stops closest_stop
+      ]
+      
+    ]
+    
+    ; remove current vertex from unvisited and add to visited
+    set visited lput closest_stop visited
+    let to_remove position closest_stop unvisited
+    set unvisited remove-item to_remove unvisited
+    
+    ; move to next vertex and find distance
+    let closest_stop_info find-shortest-distance path_lengths unvisited
+    set closest_stop (item 0 closest_stop_info)
+    set closest_distance (item 1 closest_stop_info)
+  ]
+  
+  ; report shortest path to (one of the) destination ids
+  report get-route departure_id closest_stop previous_stops
+end
+
+
+to-report set-route [destinations]
+  let new_route []
+  set new_route find-route current_stop destinations
+  report new_route
+end
+
+
+to find-route [cur_inbox route_name]
+  
+  ; get first message from inbox and base route on this
+  let next_info item 0 cur_inbox
+  set next_info item 2 next_info
+  let cur_stop item 0 next_info
+  let cur_people item 1 next_info
+  
+  ; if intermediate route, just find route to one stop
+  ifelse route_name = "intermediate" [
+    
+    ; use Dijkstra's algorithmn for finding shortest path
+    let next_dest []
+    set next_dest lput cur_stop next_dest
+    let next_route set-route next_dest
+    
+    ; set intermediate route
+    ask bus bus_id [
+      set intermediate_route next_route
+    ]
+  ]
+  
+  ; else if effective route, find route that goes through all desired destinations
+  [
+    ; find all destinations where people want to go
+    let desired_destinations []
+    foreach cur_people [
+      let desired_destination item 1 ?
+      if not (member? desired_destination desired_destinations) [
+        set desired_destinations lput desired_destination desired_destinations
+      ]  
+    ]
+    
+    ; find route to those desired destinations
+    let next_route set-route desired_destinations
+    ask bus bus_id [
+      set effective_route next_route
+    ]
+  ]
+  
+end
+
+to travel-actions [people_at_stop]
+  
+  ; if fixed route just follow fixed route
+  ifelse route_type = "fixed" [
+    
+    if length people_at_stop > 0 [
+      
+      ; send message to freestyler colleague if people left at stop
+      let message []
+      set message lput current_stop message
+      set message lput people_at_stop message
+      send-message (bus_id + 1) message
+    ]
+    
+    ; travel to next stop (fixed route)
+    travel-to (get-next-stop current_stop)
+  ]
+  [
+    ifelse route_type = "freestyler" [
+      ; if there are messages      
+      if length inbox > 0 [
+        
+        ; get first message from inbox
+        let first_info_inbox item 0 inbox
+        let first_message item 2 first_info_inbox
+        
+        ; get stop at which fixed route bus left people
+        let first_stop item 0 first_message
+        
+        ; if we are not currently at that stop, go to that stop
+        ifelse not (current_stop = first_stop) [
+          
+          ask bus bus_id [
+            
+            ; if route to that stop not yet known, find it
+            ifelse intermediate_route = -1 [
+              find-route inbox "intermediate"
+              set route_counter 0
+            ]
+            
+            ; travel to stop where fixed route bus left people
+            [
+              travel-to (item route_counter intermediate_route)
+              set route_counter (route_counter + 1) mod (length intermediate_route)
+            ]
+          ]
+          
+        ]
+        
+        ; else if we are at the stop where fixed route bus left people, reset intermediate route and set route to route that brings those people to their stops
+        [
+          set intermediate_route -1
+          find-route inbox "effective"
+        ]
+      ]
+      
+    ]
+    [
+      ; travel to next stop (boss route)
+      travel-to (get-next-stop current_stop)
+    ]
+    
+  ]
+    
+end
+
+to execute-actions
+  
+  ; get capacity
+  let capacity get-capacity bus_type
+      
+  ; if we are at a bus_stop
+  ifelse current_stop >= 0 
+  [ 
+    
+    ; initialize list of people left at stop
+    let left_at_stop []
+       
+    ; drop off people and pick up people
+    set left_at_stop drop-and-pick current_stop bus_passengers bus_id capacity
+    
+    ; actions to take for travelling from new stop
+    travel-actions left_at_stop    
+    
+  ]
+  [
+
+    ; keep travelling to next stop
+    travel-to next_stop  
+  ]
+  
+  ; only have one bus spawn new busses
+  let boss 24
+  
+  ; decrement spawn count
+  set spawn_count spawn_count - 1
+  
+  ; add new buses if necessary
+  if bus_id = boss and spawn_count <= 0 [
+    spawn    
+  ]
+  
+end
