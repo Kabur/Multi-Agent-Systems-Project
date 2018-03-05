@@ -90,7 +90,13 @@ to-report get_next_stop
   let nxt item path_position path
 
   ; needed for when the bus starts the path at the centraal
-  if current_stop = nxt [ set nxt get_next_stop]
+  ; if -1 is returned, we only have the current stop in our path --> stay where we are
+  if (current_stop = nxt) [ 
+    set nxt get_next_stop
+
+    if (path_length > 1) 
+      [ set nxt -1]
+  ]
 
   report nxt
 end
@@ -206,7 +212,10 @@ to execute-actions
 
       ]
 
-      travel-to get_next_stop
+      let dest get_next_stop
+      if dest != -1 
+        [ travel-to get_next_stop ]
+      
 
     ]
     ; else pah_type = "freestyler"
@@ -230,14 +239,26 @@ to execute-actions
 
 	        broadcast_message message
 
-	        ; todo: find shortest path from current_stop to claimed_stop
-	        let shortest_path []
+	        ; dijkstra
+	        let shortest_path [] 
+          let path_temp []
 	        ask bus_stop current_stop [ set shortest_path nw:turtles-on-weighted-path-to bus_stop claimed_stop "route_size" ]
-	        show "WELL LETS SEE IT LADS"
-	        show shortest_path
+
+          ; convert turtles to id's
+          foreach shortest_path [
+            ask ? [
+              let id_temp bus_stop_name_to_id name
+              show (list name id_temp) 
+              set path_temp lput id_temp path_temp
+            ]
+          ]
+          set path path_temp
+
+          let dest get_next_stop
+          if dest != -1 
+            [ travel-to get_next_stop ]
         ]
 
-        ; todo after we got the path: travel-to get_next_stop
       ]
       ; else, we were following a distress signal, initialize path based on where the people on the stop want to go
       ; todo: think carefully when drop_and_pick and path setting happens!
@@ -245,9 +266,15 @@ to execute-actions
         show "We are at a bus stop, traveling_to_signal=true"
         set traveling_to_signal false
 
-        ; todo: find shortest path through all passengers' destinations
+        ; todo:  
+          ; find shortest path through all passengers' destinations
+          ; get all destinations
+          ; show sort-on [reporter] bus_stops  ; to sort by distance to the current stop
+          ; call dijkstra on this sorted path
 
-        ; travel-to get_next_stop
+        ; let dest get_next_stop
+        ; if dest != -1 
+          ; [ travel-to get_next_stop ]
       ]
 
     ]
@@ -255,8 +282,9 @@ to execute-actions
   ]
   [
     ; keep travelling to next stop
-    ; if path_position > -1 [travel-to next_stop]
-    travel-to next_stop
+    let dest get_next_stop
+    if dest != -1 
+      [ travel-to get_next_stop ]
   ]
   
   ; just spawn 1 bus right away
@@ -342,30 +370,31 @@ end
 ; ********************************************************************************
 ;                                PATH FINDING
 ; ********************************************************************************
-; todo: dijkstra needs to be implemented so that it returns a path, which means a list of stops
 
-to-report find_path_temp [destination fixed_path]
-  let keep_appending true
-  let temp_path []
 
-  foreach fixed_path [
-    if keep_appending = true [
-      set temp_path lput ? temp_path
+ ; to-report find_path_temp [destination fixed_path]
+  ; let keep_appending true
+  ; let temp_path []
+; 
+  ; foreach fixed_path [
+    ; if keep_appending = true [
+      ; set temp_path lput ? temp_path
+; 
+      ; if ? = destination [ 
+        ; set keep_appending false 
+      ; ]
+; 
+    ; ]
+  ; ]
+; 
+  ; report temp_path
+; end
 
-      if ? = destination [ 
-        set keep_appending false 
-      ]
-
-    ]
-  ]
-
-  report temp_path
-end
 ; ********************************************************************************
 ;                                PATH FINDING
 ; ********************************************************************************
-
+; note: renamed a bunch of things, such as 'routes' to 'paths' because route is a turtle type in their file 
 ; todo: votin on spawning new buses / voting on disabling buses
 ; todo: bidding on who takes the stop at distress
-; todo(done?): remove all occurences of the stop from the distress_stops lists once it's claimed
 ; todo: when checking if passenger destination is on a freestyler's path, only consider future stops(freestylers don't drive sequentially)
+; todo: create paths for the 3 regions
