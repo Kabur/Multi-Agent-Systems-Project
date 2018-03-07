@@ -1,0 +1,44 @@
+        let waiting_passengers get-passengers-at-stop current_stop
+        ; initialize empty list for votes
+        let bus_stop_votes []
+        foreach graph [
+          set bus_stop_votes lput 0 bus_stop_votes
+        ]
+
+        ; based on votes, decide the destination
+        let voted_stop -1
+        let max_votes 0
+        foreach waiting_passengers [
+          let voted_for item 1 ? ; which stop
+          let new_vote_value item voted_for bus_stop_votes ;get previous number of votes
+          set bus_stop_votes replace-item voted_for bus_stop_votes new_vote_value ; update number of votes
+
+          if max_votes < new_vote_value [
+            set max_votes new_vote_value
+            set voted_stop voted_for
+          ]
+        ]
+
+
+
+  
+  ifelse bus_id mod 2 = 1 
+  [
+    set path_type "freestyler"
+    show "initialized as freestyler"
+  ]
+  [
+    set path_type "fixed"
+    show "initialized as fixed-router"
+    ; fixed path
+    set path []
+
+    let path_temp ["Centraal" "Dam" "Centraal" "Sloterdijk" "Lelylaan" "Amstelveenseweg" "VU" "Zuid" "RAI" "Amstel" "SciencePark" "UvA" "SciencePark" "Muiderpoort" 
+    "Wibautstraat" "Museumplein" "Haarlemmermeerstation" "Surinameplein" "Evertsenstraat" "Leidseplein" "Weesperplein" "Waterlooplein" "Hendrikkade" "Hasseltweg" "Floradorp"  "Hasseltweg"  "Buikslotermeer" "Hasseltweg" "Hendrikkade"]
+    ; let path_temp ["centraal" "sloterdijk" "lelylaan" "Evertsenstraat" "Hendrikkade" "Surinameplein" "Floradorp" "Buikslotermeer" "Hasseltweg"]
+
+    foreach path_temp [
+      set path lput bus_stop_name_to_id ? path
+    ]
+    show path
+  ]
