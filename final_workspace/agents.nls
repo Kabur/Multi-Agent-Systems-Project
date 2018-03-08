@@ -24,6 +24,7 @@ buses-own [
   spawn_later
   region
   claimed_distress_stop
+  latest_bus_id
 ]
  
 globals [graph counter] 
@@ -35,6 +36,7 @@ to init-buses
     ; This list contains the topology of the entire network of bus stops, which is known to all agents. You can use this, for instance, to calculate the shortest path between two bus stops.
     set graph [[22 15 14] [11 19 23 7] [8] [16 4 20 9] [3 5 10] [4 16 10 17] [8] [1 17 13] [2 6 9] [3 8 20] [4 5 17 13 21] [1 16 17] [20 15 22] [7 10 22 23] [0 23] [0 12 18] [3 5 11] [5 7 10 11] [15] [1 23] [3 9 12 21] [10 20 22] [0 12 13 21] [1 13 14 19]]
     initialize_bus "fixed" 1 []
+    set latest_bus_id 24
   ]
   [ 
     set path_type "uninitialized"
@@ -52,7 +54,8 @@ to initialize_bus [initial_path_type initial_path initial_distress_stops]
   set path []
   set region -1
 
-  if initial_path_type = "fixed" [
+  ifelse initial_path_type = "fixed" [
+    set color blue
     ; todo: create different paths for these 3 regions
     if initial_path = 1 [
       ; let path_temp ["Centraal" "Dam" "Centraal" "Sloterdijk" "Lelylaan" "Amstelveenseweg" "VU" "Zuid" "RAI" "Amstel" "SciencePark" "UvA" "SciencePark" "Muiderpoort" 
@@ -60,7 +63,7 @@ to initialize_bus [initial_path_type initial_path initial_distress_stops]
       ; foreach path_temp [
         ; set path lput bus_stop_name_to_id ? path
       ;
-      set path [3 16 11 16]
+      set path [3 9 8 6 8 2 8 9 3 16 11 17 5 4]
       set region 1
     ]
     if initial_path = 2 [
@@ -69,7 +72,7 @@ to initialize_bus [initial_path_type initial_path initial_distress_stops]
       ; foreach path_temp [
         ; set path lput bus_stop_name_to_id ? path
       ; ]
-      set path [17 5 4 10]
+      set path [3 20 21 22 0 15 18 15 12 20]
       set region 2
     ]
     if initial_path = 3 [
@@ -78,9 +81,12 @@ to initialize_bus [initial_path_type initial_path initial_distress_stops]
       ; foreach path_temp [
         ; set path lput bus_stop_name_to_id ? path
       ; ]    
-      set path [23 13 7 17 7 1]
+      set path [3 4 10 13 7 1 19 23 14 23 13 10 4]
       set region 3
     ]
+  ]
+  [
+    set color pink
   ]
   show (list "Initializing " initial_path_type initial_path path)
 end
@@ -163,7 +169,9 @@ to-report drop_and_pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
   report still_at_stop
 end
 
-
+; ********************************************************************************
+;                             EXECUTE ACTIONS - TOTAL SYSTEM
+; ********************************************************************************
 to execute-actions
   
   ; if a bus is not yet initialized, get info from inbox to initialize
@@ -181,7 +189,11 @@ to execute-actions
 
   ; if there was a bus waiting to be initialized through a message(we called 'spawn' last tick)
   if length spawn_later > 0 [
-    send-message item 0 spawn_later item 1 spawn_later
+    show spawn_later
+    foreach spawn_later [
+      show ?
+      send-message item 0 ? item 1 ?
+    ]
     set spawn_later []
   ]
 
@@ -214,22 +226,30 @@ to execute-actions
       [ travel-to next_stop ]
   ]
   
-  ; just spawn 1 bus right away
+  ; just spawn 3 buses right away
   let boss 24
   set spawn_counter spawn_counter - 1
   if bus_id = boss and spawn_counter = 0 [
-    set spawn_later spawn "fixed" 1 distress_stops
+    let new_bus_id spawn "fixed" 2 distress_stops
+    let new_bus list item 0 new_bus_id item 1 new_bus_id
+    let new_bus_id_2 spawn "fixed" 3 distress_stops
+    let new_bus_2 list item 0 new_bus_id_2 item 1 new_bus_id_2
+    set spawn_later lput new_bus spawn_later
+    set spawn_later lput new_bus_2 spawn_later
+    show (word "SPAWN LATER LIST")
+    show spawn_later
   ]
-
   if bus_id = boss and spawn_counter = -30 [
-    set spawn_later spawn "freestyler" [] distress_stops
+    let new_bus_id spawn "freestyler" [] distress_stops
+    set spawn_later lput new_bus_id spawn_later
+    set spawn_counter 30
   ]
   
 end
 
 
 ; ********************************************************************************
-;                             EXECUTE ACTIONS FREESTYLE BUSES
+;                             EXECUTE ACTIONS -FREESTYLE BUSES
 ; ********************************************************************************
 to execute-actions-freestyler
   
@@ -333,7 +353,7 @@ to execute-actions-freestyler
 end
 
 ; ********************************************************************************
-;                             EXECUTE ACTIONS FIXED BUSES
+;                             EXECUTE ACTIONS - FIXED BUSES
 ; ********************************************************************************
 to execute-actions-fixed [people_left_at_stop]
   
@@ -410,7 +430,7 @@ to-report spawn [initial_path_type initial_path initial_distress_stops]
   ; initial_path = numbers from 1 to 3 if fixed; [] if freestyler
 
   add-bus 3
-  let new_id (count turtles)
+  let new_id latest_bus_id + 1
 
   ; send message to the new bus to initialize with parameters
   let message []
@@ -421,7 +441,7 @@ to-report spawn [initial_path_type initial_path initial_distress_stops]
   show (list "Sending to: " new_id " init message: " message)
 
   ; send-message new_id message ;this is now done at the beginning of the next execute-actions call
-
+  set latest_bus_id new_id
   report (list new_id message)
 end
 
