@@ -43,15 +43,20 @@ to init-buses
   [ 
     set path_type "uninitialized"
     set inbox_position -1
+    set spawn_later []
+    set path []
+    set distress_stops []
+	set path_position 0 
+	set spawn_counter 0
   ]
 end
 
 to initialize_bus [initial_path_type initial_region initial_distress_stops]
   set path_type initial_path_type
   set path_position 0 ; changed from -1
-  set spawn_counter 30
+  set spawn_counter 0
   set distress_stops initial_distress_stops
-  show (list "initializing distress stops: " length distress_stops distress_stops)
+  show (list "Initializing " initial_path_type "distress stops:" distress_stops)
   set traveling_to_signal false
   set spawn_later []
   set path []
@@ -75,7 +80,6 @@ to initialize_bus [initial_path_type initial_region initial_distress_stops]
   [
     set color pink
   ]
-  show (list "Initializing " initial_path_type initial_region path)
 end
 
 
@@ -112,7 +116,7 @@ to-report drop_and_pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
   foreach cur_bus_passengers [
      if item 1 ? = cur_bus_stop [
          drop-off-passenger item 0 ?
-         ; show (list "dropping passenger " item 0 ?)
+         show (list "DROPPING passenger " item 0 ? "with destination: " item 1 ?)
      ]  
   ]
    
@@ -127,27 +131,30 @@ to-report drop_and_pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
 
       ; iterate through the bus path to find if passengers' destination is on the path 
       foreach path [ 
-        if passenger_destination = ? [
-          set is_on_path true
+        ; (not tested) for freestylers, only consider the FUTURE stops in the path because they do not repeat the path
+        if path_type = "fixed" or position ? path >= path_position [
+          if passenger_destination = ? [
+            set is_on_path true
+          ]
         ]
       ]
       ; if the passenger is on the path -> pick him/her up
       ifelse is_on_path = true [
         pick-up-passenger item 0 ?
         set n_passengers n_passengers + 1
-        ; show (list "Picking up passenger " ? "with destination: " passenger_destination)
+        show (list "Picking up passenger " ? "with destination: " passenger_destination)
       ]
       [
         ; take passengers if you are a freestyler and you have nowhere to go
-        ifelse path_type = "freestyler" and empty? path and current_stop = claimed_distress_stop[
-          set is_on_path true
-          pick-up-passenger item 0 ?
-          set n_passengers n_passengers + 1
-        ]
-        [
+        ; ifelse path_type = "freestyler" and empty? path and current_stop = claimed_distress_stop[
+          ; set is_on_path true
+          ; pick-up-passenger item 0 ?
+          ; set n_passengers n_passengers + 1
+        ; ]
+        ; [
           set still_at_stop lput ? still_at_stop
-          ; show (list "NOT picking up passenger " ? "with destination: " passenger_destination)
-        ]
+          show (list "NOT picking up passenger " ? "with destination: " passenger_destination)
+        ; ]
       ]
 
     ] 
@@ -162,67 +169,39 @@ end
 to execute-actions
   
   show (list minutes "***********************************************************************")
-  show (list "inbox position: " inbox_position)
-  read-inbox
+  ; show (list "inbox position: " inbox_position)
+
+  ; order of these 3 is important!
+  ; send init messages to spawned buses
+  if path_type != "uninitialized" [ resolve_spawning ]
+  ; read inbox, update distress_stops, (freestylers get spawn there too)
+  read_inbox
+  ; if we didnt receive our init message yet, wait
   if path_type = "uninitialized" [ stop ]
 
-  let capacity get-capacity bus_type
-
-  ; if there was a bus waiting to be initialized through a message(we called 'spawn' last tick)
-  if length spawn_later > 0 [
-    show (list "spawn_later: " spawn_later)
-    foreach spawn_later [
-      ; show ?
-      send-message item 0 ? item 1 ?
-      show (list "Sending init message to: " ?)
-    ]
-    set spawn_later []
-  ]
-
-
-  ; if we are at a bus_stop
+  ; if we are at any bus_stop
   ifelse current_stop >= 0 [    
-    show (list "we are at stop" current_stop " Current distress_stops list: " distress_stops)
+    show (list "we are at stop" current_stop " Current distress_stops:" distress_stops "Current path:" path "path_position: " path_position)
     
     ; drop off people and pick up people 
     let still_at_stop []
-    set still_at_stop drop_and_pick current_stop bus_passengers bus_id capacity
+    set still_at_stop drop_and_pick current_stop bus_passengers bus_id get-capacity bus_type
         
+    ; decide what to do next
     ifelse path_type = "fixed" [
       execute-actions-fixed still_at_stop
     ]
-    ; else path_type = "freestyler"
     [
       execute-actions-freestyler
     ]
 
   ]
+  ; else we are NOT on a bus stop -> keep driving
   [
-    ; keep travelling to next stop
     travel-to next_stop
-    ; if next_stop != -1 
-      ; [ travel-to next_stop ]
   ]
   
-  ; just spawn 3 buses right away
-  let boss 24
-  set spawn_counter spawn_counter - 1
-
-  if bus_id = boss and spawn_counter = 0 [
-    let new_bus_id spawn "fixed" 2 distress_stops
-    let new_bus list item 0 new_bus_id item 1 new_bus_id
-    let new_bus_id_2 spawn "fixed" 3 distress_stops
-    let new_bus_2 list item 0 new_bus_id_2 item 1 new_bus_id_2
-    set spawn_later lput new_bus spawn_later
-    set spawn_later lput new_bus_2 spawn_later
-    ; show (word "SPAWN LATER LIST")
-    show (list "spawn_later: " spawn_later)
-  ]
-  if bus_id = boss and spawn_counter = -30 [
-    let new_bus_id spawn "freestyler" [] distress_stops
-    set spawn_later lput new_bus_id spawn_later
-    set spawn_counter 30
-  ]
+  set spawn_counter spawn_counter + 1
   
 end
 
@@ -232,75 +211,68 @@ end
 ; ********************************************************************************
 to execute-actions-freestyler
   
-  ; remove var from path if we are at current stop 
-    if length path > 0 and item 0 path = current_stop [
-      set path remove-item 0 path
-    ]
-  
     ; if we were not following a distress signal(but rather transferring people from a signal), react to a signal
     ; Freestyler actions after dropping and picking people 
     ifelse traveling_to_signal = false [
-      ; todo: COMPETITION: bidding for stops; Right now we'll just have the freestyler claim the next bus stop in distress in he queue
-      show "We are at a bus stop; traveling_to_signal=false"
-      set traveling_to_signal true
-      ; if there are stops in distress, you finished your previous route and you dropped off people from previous distress stop: claim one and notify other freestylers]
-      show (word "vars for if")
-      show distress_stops
-      show path
-      show bus_passengers
-      if length distress_stops > 0 and empty? path and empty? bus_passengers [
-        
+      show (list "traveling_to_signal=false, path: " path "path_position: " path_position)
+
+      ; if we finished the path, but there are no distress stops, wait
+      if length distress_stops = 0 and length path - 1 <= path_position [ stop ]
+
+      ; if there are stops in distress and you finished your path, claim a stop
+	      ; if we are NOT at the end of our path, just continue to the next stop
+      if length distress_stops > 0 and length path - 1 <= path_position [ ;note: length path = 0 when we just initialized this guy
+        set traveling_to_signal true
+        set path_position 0
         let claimed_stop item 0 distress_stops
-        set distress_stops remove-item 0 distress_stops
 
         let message []
         set message lput "Claiming bus stop in distress!" message
         set message lput claimed_stop message
-        show message
 
         broadcast_message message
 
         ; dijkstra
-        show (word "HIER")
         set path dijkstra current_stop claimed_stop
-        set path remove-item 0 path
-        set claimed_distress_stop claimed_stop
-        show (word "HIERO")
+        show (list "Sending claiming message:" message "new path: " path)
+
+        ; drop&picking with respect to the new path
+	    let void drop_and_pick current_stop bus_passengers bus_id get-capacity bus_type
       ]
-      let dest -1
-      if length path > 0 [
-        set dest item 0 path
+
+      let dest get_next_stop
+      if dest != -1 [  
+        travel-to dest 
+        show (list "Traveling to " dest)
       ]
-    
-      if dest != -1 
-        [ travel-to dest ]
 
     ]
     ; else, we were following a distress signal, initialize path based on where the people on the stop want to go
-    ; todo: think carefully when drop_and_pick and path setting happens!
     [
-      show "!!! We are at a bus stop, traveling_to_signal=true"
-      set traveling_to_signal false
-      
-      ; if no path find path of passengers (else just travel to next place in path)
-      if empty? path [
-        ; (todo: NOT TESTED!) we now solve traveling salesman for the passengers destinations:
+      show (list "traveling_to_signal=true, path: " path "path_position: " path_position)
+    
+      ; if we are at the end of our path, calculate a new path based on passengers wishes
+      	; if not, just continue on our path
+      if length path - 1 <= path_position [
+	    set traveling_to_signal false
+
+        ; Solve traveling salesman for the passengers destinations:
         ; get all destinations
         let waiting_passengers get-passengers-at-stop current_stop
         let destinations []
-        foreach bus_passengers [
+        foreach waiting_passengers [
           set destinations lput item 1 ? destinations
         ]
-        
+        ; show (list "waiting_passengers: " waiting_passengers)
+        show (list "destinations: " destinations)
+
         ; sort by distance to the current stop
-        ;set destinations sort-on [distance current_stop] destinations
-        
+        set destinations sort-by [get_distance_to_current_stop ?1 < get_distance_to_current_stop ?2] destinations
         
         ; build path throughout this sorted path with dijkstra
+	    set path_position 0 
         let destinations_length length destinations
         let i 0
-        show (word "destinations")
-        show destinations
         
         let start_stop current_stop
         while [i < destinations_length] [
@@ -310,23 +282,21 @@ to execute-actions-freestyler
           foreach dijkstra_path [
             set path lput ? path
           ]
-          show (word "will end at")
-          show last path
           set start_stop last path
           set i i + 1
         ]
-        show (word "PATH:")
-        show path
+
+        show (list "new path:" path)
+
+        ; drop&picking with respect to the new path
+	    let void drop_and_pick current_stop bus_passengers bus_id get-capacity bus_type
       ]
       
-      let dest -1
-      ; travel to next stop in path
-      if length path > 0 [
-        set dest item 0 path
+      let dest get_next_stop
+      if dest != -1 [  
+        travel-to dest 
+        show (list "Traveling to " dest)
       ]
-      
-      if dest != -1 
-        [ travel-to dest ]
 
     ]
 end
@@ -358,56 +328,96 @@ end
 ; ********************************************************************************
 ;                             HELPER FUNCTIONS
 ; ********************************************************************************
-to read-inbox
+to read_inbox
   
-  show (list "inbox: " inbox)
+  ; show (list "inbox: " inbox)
   let inbox_length length inbox
   ifelse inbox_length - 1 > inbox_position [ 
-      set inbox_position inbox_position + 1 
-      show (list "inbox_position: " inbox_position)
-    ]
-    [ stop ]
+    set inbox_position inbox_position + 1 
+    ; show (list "inbox_position: " inbox_position)
+  ]
+  [ stop ]
 
-  let read-messages false
+  let read_messages false
   let full_message item inbox_position inbox
   let tick_sent item 0 full_message
   let sender item 1 full_message
   let message item 2 full_message  
   let message_type item 0 message
   
-  ; set inbox remove-item 0 inbox
-  
-  if message_type = "Claiming bus stop in distress!" and read-messages = false [
-    show (word  "claim")
-    set read-messages true
+
+  if message_type = "Claiming bus stop in distress!" and read_messages = false [
+    ; remove the claimed stop from the list
+    let distress_stop item 1 message
+    show (list "Received claiming message: " message "distress_stops: " distress_stops)
+
+    if member? distress_stop distress_stops = true [
+      let temp_pos position distress_stop distress_stops
+      set distress_stops remove-item temp_pos distress_stops
+      show (list "Removed a distress stop; new list: " distress_stops)
+    ]
+
+    set read_messages true
   ]
   
-  if (message_type =  "freestyler" or message_type = "fixed")  and read-messages = false [
-    show (word "new")
+
+  if (message_type =  "freestyler" or message_type = "fixed")  and read_messages = false [
+    ; show (word "new")
     show message_type
     initialize_bus item 0 message item 1 message item 2 message
-    set read-messages true
+    set read_messages true
   ]
   
-  ; if message_type = "Bus stop in distress!" and path_type = "freestyler" and read-messages = false [
-  if message_type = "Bus stop in distress!" and read-messages = false [
+
+  ; if message_type = "Bus stop in distress!" and path_type = "freestyler" and read_messages = false [
+  if message_type = "Bus stop in distress!" and read_messages = false [
 
     ; get the bus stop at distress
     let distress_stop item 1 message
 
-    show (list "Received message: " message "distress_stops: " distress_stops)
+    show (list "Received distress message: " message "distress_stops: " distress_stops)
 
     ; add it to the queue of stops in distress if it's not already there
     if member? distress_stop distress_stops = false [
       show (list "Adding distress stop: " distress_stop)
       set distress_stops lput distress_stop distress_stops
+      ; if this is the boss and a new distress stop was added, spawn a freestyler
+      if bus_id = 24 and spawn_counter >= 30 [
+        set spawn_counter 0
+        show (list "Spawning a freestyler; distress_stops: " distress_stops)
+        let new_bus_id spawn "freestyler" [] distress_stops
+        set spawn_later lput new_bus_id spawn_later
+      ]
     ]
-    show (list "Distress stops: " distress_stops)
-    set read-messages true
+
+    ; show (list "Distress stops: " distress_stops)
+    set read_messages true
   ]
   
 end
 
+to resolve_spawning
+  if length spawn_later > 0 [
+    show (list "spawn_later: " spawn_later)
+    foreach spawn_later [
+      ; show ?
+      send-message item 0 ? item 1 ?
+      show (list "Sending init message to: " ?)
+    ]
+    set spawn_later []
+  ]
+
+  if count buses = 1 [
+    let new_bus_id spawn "fixed" 2 distress_stops
+    let new_bus list item 0 new_bus_id item 1 new_bus_id
+    let new_bus_id_2 spawn "fixed" 3 distress_stops
+    let new_bus_2 list item 0 new_bus_id_2 item 1 new_bus_id_2
+    set spawn_later lput new_bus spawn_later
+    set spawn_later lput new_bus_2 spawn_later
+    ; show (word "SPAWN LATER LIST")
+    show (list "spawn_later: " spawn_later) 
+  ]
+end
 
 to-report spawn [initial_path_type initial_region initial_distress_stops]
   ; initial_path_type = "fixed" or "freestyler"
@@ -421,8 +431,6 @@ to-report spawn [initial_path_type initial_region initial_distress_stops]
   set message lput initial_path_type message
   set message lput initial_region message
   set message lput initial_distress_stops message
-
-  show (list "Sending to: " new_id " init message: " message)
 
   ; send-message new_id message ;this is now done at the beginning of the next execute-actions call
   set latest_bus_id new_id
@@ -462,15 +470,47 @@ to broadcast_message [message]
     	set destination_id bus_id
     	ask bus source_id [
     		send-message destination_id message
-    		show (list "Broadcasting message from " bus_id " to " destination_id " message: " message)
+    		; show (list "Broadcasting message from " bus_id " to " destination_id " message: " message)
     	]
     ]
 
 end
 
-; ********************************************************************************
-;                             HELPER FUNCTIONS
-; ********************************************************************************
+to-report id_to_bus_stop [temp_id]
+	let temp_busstop "Empty"
+
+	ask bus_stop temp_id [
+		set temp_busstop self
+	]
+
+	report temp_busstop
+end
+
+to-report id_to_bus_stop_list [temp_id_list]
+	let temp_list []
+
+	foreach temp_id_list [
+		ask bus_stop ? [
+			set temp_list lput self temp_list
+		]
+	]
+
+	report temp_list
+end
+
+to-report get_distance [source_stop dest_stop]
+	let temp_dist 0
+	ask bus_stop source_stop [ set temp_dist distance id_to_bus_stop dest_stop]
+
+	report temp_dist 
+end
+
+to-report get_distance_to_current_stop [dest_stop]
+	let temp_dist 0
+	ask bus_stop current_stop [ set temp_dist distance id_to_bus_stop dest_stop]
+
+	report temp_dist 
+end
 ; ********************************************************************************
 ;                                PATH FINDING
 ; ********************************************************************************
@@ -493,29 +533,14 @@ to-report dijkstra [cur_stop claimed_stop]
 end
 
 
- ; to-report find_path_temp [destination fixed_path]
-  ; let keep_appending true
-  ; let temp_path []
-; 
-  ; foreach fixed_path [
-    ; if keep_appending = true [
-      ; set temp_path lput ? temp_path
-; 
-      ; if ? = destination [ 
-        ; set keep_appending false 
-      ; ]
-; 
-    ; ]
-  ; ]
-; 
-  ; report temp_path
-; end
-
 ; ********************************************************************************
-;                                PATH FINDING
+;                               NOTES AND TODOS
 ; ********************************************************************************
-; todo: try to split up the code into files, it must be possible like cmon
+; todo: try to split up the code into files
 ; todo: votin on spawning new buses / voting on disabling buses
 ; todo: bidding on who takes the stop at distress
-; todo: when checking if passenger destination is on a freestyler's path, only consider future stops(freestylers don't drive sequentially)
-; todo: when a bus stop is claimed, fixed-routers should remove it from the list as well
+
+; note: when submitting final, change the color to what it was previously
+; note: we never remove stuff from path, we just move path_position to keep track of where we are!
+; note: use show (list stuff "more suff") to print multiple things in 1 line
+; note: use _ instead of - in functions
