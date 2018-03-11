@@ -264,8 +264,6 @@ to execute-actions-freestyler
         foreach waiting_passengers [
           set destinations lput item 1 ? destinations
         ]
-        ; show (list "waiting_passengers: " waiting_passengers)
-        show (list "destinations: " destinations)
 
         ; sort by distance to the current stop
         set destinations sort-by [get_distance_to_current_stop ?1 < get_distance_to_current_stop ?2] destinations
@@ -330,8 +328,21 @@ to execute-actions-fixed [people_left_at_stop]
 end
 
 ; ********************************************************************************
-;                             HELPER FUNCTIONS
+;                             	INBOX MANAGEMENT
 ; ********************************************************************************
+to broadcast_message [message]
+	let source_id bus_id
+    let destination_id -1
+    ask buses [
+    	set destination_id bus_id
+    	ask bus source_id [
+    		send-message destination_id message
+    		; show (list "Broadcasting message from " bus_id " to " destination_id " message: " message)
+    	]
+    ]
+end
+
+
 to read_inbox
   
   ; show (list "inbox: " inbox)
@@ -400,6 +411,9 @@ to read_inbox
   
 end
 
+; ********************************************************************************
+;                             HELPER FUNCTIONS
+; ********************************************************************************
 to resolve_spawning
   if length spawn_later > 0 [
     show (list "spawn_later: " spawn_later)
@@ -411,6 +425,7 @@ to resolve_spawning
     set spawn_later []
   ]
 
+  ; spawn the remaining 2 region buses at the beginning
   if count buses = 1 [
     let new_bus_id spawn "fixed" 2 distress_stops
     let new_bus list item 0 new_bus_id item 1 new_bus_id
@@ -463,21 +478,6 @@ to-report get-capacity [bs_type]
     ]
   ]
   report capacity
-end
-
-
-to broadcast_message [message]
-
-	let source_id bus_id
-    let destination_id -1
-    ask buses [
-    	set destination_id bus_id
-    	ask bus source_id [
-    		send-message destination_id message
-    		; show (list "Broadcasting message from " bus_id " to " destination_id " message: " message)
-    	]
-    ]
-
 end
 
 to-report id_to_bus_stop [temp_id]
@@ -540,6 +540,7 @@ end
 ; ********************************************************************************
 ;                               NOTES AND TODOS
 ; ********************************************************************************
+; todo (IMPORTANT): read ALL messages in read_inbox, not just one
 ; todo: try to split up the code into files
 ; todo: votin on spawning new buses / voting on disabling buses
 ; todo: bidding on who takes the stop at distress
@@ -548,3 +549,4 @@ end
 ; note: we never remove stuff from path, we just move path_position to keep track of where we are!
 ; note: use show (list stuff "more suff") to print multiple things in 1 line
 ; note: use _ instead of - in functions
+; note: the freestyler just waits if there are no distress_stops for now
