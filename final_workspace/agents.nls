@@ -15,20 +15,55 @@ buses-own [
   ; New local variables for students.
   ; You can create any new local variable you want. Just declare them here.
   beliefs
+  
+  ; fixed or freestyle
   path_type
+  
+  ; counter that counts down every tick and gets reset after a spawn
   spawn_counter
+  
+  ; counter that keeps track of where a bus is on its route
   path_position
+  
+  ; counter that keeps track of which messages are read by a bus
   inbox_position
+  
+  ; list of stops that form a buses route
   path
+  
+  ; list with distress stops (where people are left by buses)
   distress_stops
+  
+  ; boolean determining if a freestyle bus is traveling to a signal or not
   traveling_to_signal
+  
+  ; list of buses to spawn
   spawn_later
+  
+  ; var for fixed routers, region 1,2 or 3
   region
+  
+  ; boolean determining whether a freestyle bus claimed a distress stop currently or not
   claimed_distress_stop
+  
+  ; id of the newest bus added
   latest_bus_id
+  
+  ; region leaders list for keeping track of votes of his region
+  votes
+  
+  ; boolean determining if a bus is a region leader or not
+  leader
+  
+  ; last capacity
+  last_capacity
+  
+  ; voting id
+  voting_idx
 ]
- 
-globals [graph counter] 
+
+; remove global when handing in
+globals [graph TEMP_LOGGING_GLOBAL] 
 
 to init-buses
 	; Initialize your agents here.
@@ -39,6 +74,7 @@ to init-buses
 		initialize_bus "fixed" 1 []
 		set latest_bus_id 24
 		set inbox_position -1
+    set last_capacity get-capacity bus_type
 	]
 	[ 
 		set path_type "uninitialized"
@@ -48,6 +84,12 @@ to init-buses
 		set distress_stops []
 		set path_position 0 
 		set spawn_counter 0
+    set leader false
+    set votes [0]
+    set last_capacity get-capacity bus_type
+    
+    ; set to true to show logging messages in terminal
+    set TEMP_LOGGING_GLOBAL false
 	]
 end
 
@@ -56,26 +98,48 @@ to initialize_bus [initial_path_type initial_region initial_distress_stops]
 	set path_position 0 ; changed from -1
 	set spawn_counter 0
 	set distress_stops initial_distress_stops
-	show (list "Initializing " initial_path_type "distress stops:" distress_stops)
+  if TEMP_LOGGING_GLOBAL = true [
+    show (list "Initializing " initial_path_type "distress stops:" distress_stops)
+  ]
 	set traveling_to_signal false
 	set spawn_later []
 	set path []
 	set region -1
+  set last_capacity get-capacity bus_type
 
 	ifelse initial_path_type = "fixed" [
 		set color blue
 		if initial_region = 1 [
 			set path [3 9 8 6 8 2 8 9 3 16 11 17 5 4]
 			set region 1
+      set color blue
+      if count buses = 1 [
+        set leader true
+        set votes [0]
+      ]
 		]
 		if initial_region = 2 [
 			set path [3 20 21 22 0 15 18 15 12 20]
 			set region 2
+      set color green
+      if count buses = 3 [
+        set leader true
+        set votes [0]
+      ]
 		]
 		if initial_region = 3 [
 			set path [3 4 10 13 7 1 19 23 14 23 13 10 4]
 			set region 3
+      set color red
+      if count buses = 3 [
+        set leader true
+        set votes [0]
+      ]
 		]
+    ; set idx of place where bus can cast votes
+    let current_region region
+    let region_count count buses with [region = current_region]
+    set voting_idx region_count - 1
 	]
 	[
 		set color pink
@@ -115,7 +179,9 @@ to-report drop_and_pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
 	foreach cur_bus_passengers [
 		if item 1 ? = cur_bus_stop [
 			drop-off-passenger item 0 ?
-			show (list "DROPPING passenger " item 0 ? "with destination: " item 1 ?)
+      if TEMP_LOGGING_GLOBAL = true [
+        show (list "DROPPING passenger " item 0 ? "with destination: " item 1 ?)
+      ]
 		]  
 	]
    
@@ -141,7 +207,9 @@ to-report drop_and_pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
 			ifelse is_on_path = true [
 				pick-up-passenger item 0 ?
 				set n_passengers n_passengers + 1
-				show (list "Picking up passenger " ? "with destination: " passenger_destination)
+        if TEMP_LOGGING_GLOBAL = true [
+          show (list "Picking up passenger " ? "with destination: " passenger_destination)
+        ]
 			]
 			[
 				; take passengers if you are a freestyler and you have nowhere to go
@@ -152,7 +220,9 @@ to-report drop_and_pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
 				; ]
 				; [
 				set still_at_stop lput ? still_at_stop
-				show (list "NOT picking up passenger " ? "with destination: " passenger_destination)
+        if TEMP_LOGGING_GLOBAL = true [
+          show (list "NOT picking up passenger " ? "with destination: " passenger_destination)
+        ]
 				; ]
 			]
 
@@ -166,21 +236,29 @@ end
 ;                             EXECUTE ACTIONS - TOTAL SYSTEM
 ; ********************************************************************************
 to execute-actions
+    
 	; let temp_var minutes + hours * 60
-	show (list (minutes + hours * 60) "***********************************************************************")
+  if TEMP_LOGGING_GLOBAL = true [
+    show (list (minutes + hours * 60) "***********************************************************************")
+  ]
+	
 	; show (list "inbox position: " inbox_position)
 
 	; order of these 3 is important!
 	; send init messages to spawned buses
 	if path_type != "uninitialized" [ resolve_spawning ]
-	; read inbox, update distress_stops, (freestylers get spawn there too)
+
+	; read inbox, update distress_stops, (freestylers get spawned there too)
 	read_inbox
+
 	; if we didnt receive our init message yet, wait
 	if path_type = "uninitialized" [ stop ]
 
 	; if we are at any bus_stop
-	ifelse current_stop >= 0 [    
-		show (list "we are at stop" current_stop " Current distress_stops:" distress_stops "Current path:" path "path_position: " path_position)
+	ifelse current_stop >= 0 [
+    if TEMP_LOGGING_GLOBAL = true [
+      show (list "we are at stop" current_stop " Current distress_stops:" distress_stops "Current path:" path "path_position: " path_position)
+    ]    
 
 		; drop off people and pick up people 
 		let still_at_stop []
@@ -213,8 +291,11 @@ to execute-actions-freestyler
     ; if we were not following a distress signal(but rather transferring people from a signal), react to a signal
     ; Freestyler actions after dropping and picking people 
     ifelse traveling_to_signal = false [
-		show (list "traveling_to_signal=false, path: " path "path_position: " path_position)
-
+    
+    if TEMP_LOGGING_GLOBAL = true [
+      show (list "traveling_to_signal=false, path: " path "path_position: " path_position)
+    ]
+		
 		; if we finished the path, but there are no distress stops, wait
 		if length distress_stops = 0 and length path - 1 <= path_position [ stop ]
 
@@ -233,22 +314,28 @@ to execute-actions-freestyler
 
 	        ; dijkstra
 	        set path dijkstra current_stop claimed_stop
-	        show (list "Sending claiming message:" message "new path: " path)
-
+          if TEMP_LOGGING_GLOBAL = true [
+            show (list "Sending claiming message:" message "new path: " path)
+          ]
+	        
 	        ; drop&picking with respect to the new path
-		    let void drop_and_pick current_stop bus_passengers bus_id get-capacity bus_type
+		      let void drop_and_pick current_stop bus_passengers bus_id get-capacity bus_type
 		]
 
 		let dest get_next_stop
 		if dest != -1 [  
 			travel-to dest 
-			show (list "Traveling to " dest)
+      if TEMP_LOGGING_GLOBAL = true [
+        show (list "Traveling to " dest)
+      ]
 		]
 
     ]
     ; else, we were following a distress signal, initialize path based on where the people on the stop want to go
     [
-		show (list "traveling_to_signal=true, path: " path "path_position: " path_position)
+    if TEMP_LOGGING_GLOBAL = true [
+      show (list "traveling_to_signal=true, path: " path "path_position: " path_position)
+    ]
 
 		; if we are at the end of our path, calculate a new path based on passengers wishes
 		; if not, just continue on our path
@@ -285,8 +372,10 @@ to execute-actions-freestyler
 				set start_stop last path
 				set i i + 1
 			]
-
-			show (list "new path:" path)
+      
+      if TEMP_LOGGING_GLOBAL = true [
+        show (list "new path:" path)
+      ]
 
 			; drop&picking with respect to the new path
 			let void drop_and_pick current_stop bus_passengers bus_id get-capacity bus_type
@@ -295,7 +384,9 @@ to execute-actions-freestyler
 		let dest get_next_stop
 		if dest != -1 [  
 			travel-to dest 
-			show (list "Traveling to " dest)
+      if TEMP_LOGGING_GLOBAL = true [
+        show (list "Traveling to " dest)
+      ]
 		]
 
     ]
@@ -317,6 +408,30 @@ to execute-actions-fixed [people_left_at_stop]
 
 	]
 
+  let voting_threshold 30
+  let capacity get-capacity bus_type
+  let current_passengers length bus_passengers
+  let empty_seats capacity - current_passengers
+  
+  ; if number of empty seats below a certain threshold and the last capacity was above that treshold, vote for a new bus
+  ifelse empty_seats <= voting_threshold and last_capacity >= voting_threshold [
+    show (list "casting vote yes because empty seats is " empty_seats " and last capcity was " last_capacity)
+    cast_vote 1
+    set last_capacity empty_seats
+  ]
+  [
+    ; if empty seats above a certain threshold and last capacity was below that threshold, vote for no new bus
+    if empty_seats >= voting_threshold and last_capacity <= voting_threshold [
+      show (list "casting vote no because empty seats is " empty_seats " and last capcity was " last_capacity)
+      cast_vote 0
+      set last_capacity empty_seats
+    ]
+  ]
+  ; count votes if you're a leader
+  if leader = true [
+    count_votes
+  ]
+  
 	let dest get_next_stop
 	if dest != -1 [  
 		travel-to dest 
@@ -359,12 +474,16 @@ to read_inbox
 		if message_type = "Claiming bus stop in distress!" and read_messages = false [
 		  ; remove the claimed stop from the list
 		  let distress_stop item 1 message
-		  show (list "Received claiming message: " message "distress_stops: " distress_stops)
+      if TEMP_LOGGING_GLOBAL = true [
+        show (list "Received claiming message: " message "distress_stops: " distress_stops)
+      ]
 
 		  if member? distress_stop distress_stops = true [
 		    let temp_pos position distress_stop distress_stops
 		    set distress_stops remove-item temp_pos distress_stops
-		    show (list "Removed a distress stop; new list: " distress_stops)
+        if TEMP_LOGGING_GLOBAL = true [
+          show (list "Removed a distress stop; new list: " distress_stops)
+        ]
 		  ]
 
 		  set read_messages true
@@ -373,7 +492,6 @@ to read_inbox
 
 		if (message_type =  "freestyler" or message_type = "fixed")  and read_messages = false [
 		  ; show (word "new")
-		  show message_type
 		  initialize_bus item 0 message item 1 message item 2 message
 		  set read_messages true
 		]
@@ -384,17 +502,27 @@ to read_inbox
 
 		  ; get the bus stop at distress
 		  let distress_stop item 1 message
-
-		  show (list "Received distress message: " message "distress_stops: " distress_stops)
+      
+      if TEMP_LOGGING_GLOBAL = true [
+        show (list "Received distress message: " message "distress_stops: " distress_stops)
+      ]
 
 		  ; add it to the queue of stops in distress if it's not already there
 		  if member? distress_stop distress_stops = false [
-		    show (list "Adding distress stop: " distress_stop)
+        
+        if TEMP_LOGGING_GLOBAL = true [
+          show (list "Adding distress stop: " distress_stop)
+        ]
+		    
 		    set distress_stops lput distress_stop distress_stops
 		    ; if this is the boss and a new distress stop was added, spawn a freestyler
 		    if bus_id = 24 and spawn_counter >= 30 [
 		      set spawn_counter 0
-		      show (list "Spawning a freestyler; distress_stops: " distress_stops)
+          
+          if TEMP_LOGGING_GLOBAL = true [
+            show (list "Spawning a freestyler; distress_stops: " distress_stops)
+          ]
+		      
 		      let new_bus_id spawn "freestyler" [] distress_stops
 		      set spawn_later lput new_bus_id spawn_later
 		    ]
@@ -409,16 +537,60 @@ to read_inbox
   
 end
 
+
+; ********************************************************************************
+;                             VOTING FUNCTIONS
+; ********************************************************************************
+
+
+to cast_vote [vote]
+  
+  ; save current region for getting region leader
+  let current_region region
+  let current_bus bus_id
+  let vote_id voting_idx
+  
+  ; ask region leader to change vote of bus to its vote
+  ask buses with [region = current_region and leader = true] [
+    show (list "vote is " vote " for bus " current_bus " in region " current_region)
+    show (list "previous voting list " votes)
+    set votes replace-item vote_id votes vote
+    show (list "new voting list " votes)
+  ]
+end
+
+to count_votes
+  
+  let yes_votes sum votes
+  let no_votes length votes - yes_votes
+  
+  if yes_votes >= no_votes  and spawn_counter >= 30 [
+    show (list "spawn buses because number of yes votes is " yes_votes " and number of no votes is " no_votes)
+    show (list "votes " votes)
+    let new_bus_id spawn "fixed" region distress_stops
+    set spawn_later lput new_bus_id spawn_later
+    set spawn_counter 0
+  ]
+  
+end
+
+
 ; ********************************************************************************
 ;                             HELPER FUNCTIONS
 ; ********************************************************************************
 to resolve_spawning
 	if length spawn_later > 0 [
-		show (list "spawn_later: " spawn_later)
+  
+    if TEMP_LOGGING_GLOBAL = true [
+      show (list "spawn_later: " spawn_later)
+    ]
+		
 		foreach spawn_later [
 			; show ?
 			send-message item 0 ? item 1 ?
-			show (list "Sending init message to: " ?)
+      if TEMP_LOGGING_GLOBAL = true [
+        show (list "Sending init message to: " ?)
+      ]
 		]
 		set spawn_later []
 	]
@@ -432,7 +604,9 @@ to resolve_spawning
 		set spawn_later lput new_bus spawn_later
 		set spawn_later lput new_bus_2 spawn_later
 		; show (word "SPAWN LATER LIST")
-		show (list "spawn_later: " spawn_later) 
+    if TEMP_LOGGING_GLOBAL = true [
+      show (list "spawn_later: " spawn_later) 
+    ]
 	]
 end
 
@@ -450,7 +624,18 @@ to-report spawn [initial_path_type initial_region initial_distress_stops]
 	set message lput initial_distress_stops message
 
 	; send-message new_id message ;this is now done at the beginning of the next execute-actions call
-	set latest_bus_id new_id
+
+  ; needed because region leaders can now spawn aswell 
+  ask buses with [leader = true] [
+    set latest_bus_id new_id
+  ]
+
+  ; ask leader buses to add slot for votes from new bus
+  ask buses with [region = initial_region and leader = true] [
+    let initial_vote 0
+    set votes lput initial_vote votes
+  ]
+  
 	report (list new_id message)
 end
 
@@ -538,8 +723,9 @@ end
 ; ********************************************************************************
 ;                               NOTES AND TODOS
 ; ********************************************************************************
-; todo: votin on spawning new buses / voting on disabling buses
+; todo: votin on spawning new buses / voting on disabling buses for freestyle buses
 ; todo: bidding on who takes the stop at distress
+; todo: remove global logging stuff
 
 ; note: when submitting final, change the color to what it was previously
 ; note: we never remove stuff from path, we just move path_position to keep track of where we are!
