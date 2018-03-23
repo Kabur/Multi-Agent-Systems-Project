@@ -60,7 +60,7 @@ globals [graph]
 ; ********************************************************************************************************************************************************************
 
 to init-buses
-  show (word "init")
+  ;show (word "init")
   ; Initialize your agents here.
 
   ; This list contains the topology of the entire network of bus stops, which is known to all agents. You can use this, for instance, to calculate the shortest path between two bus stops.
@@ -96,7 +96,7 @@ to init-buses
 end
 
 to initialize-bus [initial_path_type initial_region initial_freestylers my_leader current_leaders leader]
-  show (word "init2")
+  ;show (word "init2")
   
   ; set variables necessary for all buses
   set path_type initial_path_type
@@ -236,7 +236,6 @@ end
 ; ********************************************************************************************************************************************************************
 
 to execute-actions
-  show (word "exec")
   
   ; Add decision making strategies for your agents here.
   ; You are allowed to use the global variable 'ticks'.
@@ -263,7 +262,9 @@ to execute-actions
       actions-region-buses 
     ]
     [
-      actions-freestyle-buses
+      if path_type = "free" [
+        actions-freestyle-buses
+      ]
     ]    
   ]
   [
@@ -311,6 +312,7 @@ to execute-actions
 end
 
 to actions-region-buses
+  ;show (word "exec region")
   ; drop people off and pick people up
   let capacity get-capacity bus_type
   let people_left_at_stop drop-and-pick current_stop bus_passengers bus_id capacity
@@ -330,6 +332,7 @@ to actions-region-buses
 end
 
 to actions-freestyle-buses
+  ;show (word "exec freestylers")
   
   ; if we were not following a distress signal(but rather transferring people from a signal), react to a signal
     ; Freestyler actions after dropping and picking people 
@@ -346,6 +349,7 @@ to actions-freestyle-buses
         let claimed_stop item 0 distress_stops
         
         let claiming_message (list "claim" claimed_stop)
+        ;show (list "claiming distress stop: " claimed_stop)
         send-to-freestylers claiming_message
         set distress_stops remove-item 0 distress_stops
         
@@ -412,10 +416,10 @@ to actions-freestyle-buses
         if item 0 path = current_stop [
           set path remove-item 0 path
         ]
-        
-        ; drop&picking with respect to the new path
-        let void drop-and-pick current_stop bus_passengers bus_id get-capacity bus_type
       ]
+      
+      ; drop&picking
+      let void drop-and-pick current_stop bus_passengers bus_id get-capacity bus_type
       
       get-next-stop
       if next_stop != -1 and path_type != "uninitialized" [  
@@ -429,7 +433,7 @@ end
 ; ********************************************************************************************************************************************************************
 
 to cast-vote
-  
+  ;show (word "vote")
   let voting_threshold 10
   let capacity get-capacity bus_type
   let current_passengers length bus_passengers
@@ -468,7 +472,6 @@ end
 ; ********************************************************************************************************************************************************************
 
 to read-inbox
-  show (word "reading inbox")
   
   let inbox_length length inbox
   
@@ -493,10 +496,11 @@ to read-inbox
     ; initialize buses
     if message_type = "init" [
       ; item 1 is initial_path_type, item 2 is initial_region, item 3 is initial distress stops, item 4 is boolean determining if someone is a region leader
-      show (list "initial path type" (item 1 message))
+      ;show (list "initial path type" (item 1 message))
       initialize-bus item 1 message item 2 message item 3 message item 4 message item 5 message item 6 message
     ]
     
+    ; adding a new leader to region_leader_ids
     if message_type = "new leader" [
       let new_leader_id item 1 message
       if member? new_leader_id region_leader_ids = false [
@@ -504,6 +508,7 @@ to read-inbox
       ]
     ]
     
+    ; received a vote from a region bus, so change it in the voting list
     if message_type = "vote" [
       let voting_bus item 1 message
       let vote item 2 message
@@ -511,6 +516,7 @@ to read-inbox
       set votes replace-item voting_idx votes vote
     ]
     
+    ; received message that there is a new freestyler, so notify colleagues, welcome freestyler with a message telling him who his colleagues are
     if message_type = "new freestyler" [
       
       let free_id item 1 message
@@ -526,34 +532,45 @@ to read-inbox
       set freestylers lput free_id freestylers
     ]
     
+    ; received message that I have a new colleague freestyler, so add to the list
     if message_type = "new colleague" [
       
       
       let colleague_id item 1 message
+      
       ; add him to my list of freestylers
       if member? colleague_id freestylers = false [
         set freestylers lput colleague_id freestylers
       ]
+      
+      ; notify the new freestyler of the current stops in distress
       let add_stops_message (list "add distress stops" distress_stops)
       send-message colleague_id add_stops_message
         
     ]
     
+    ; received message containing current stops in distress
     if message_type = "add distress stops" [
+      
       let new_distress_stops item 1 message
       set distress_stops new_distress_stops
+      ;show (list "adding distress stops for the first time: " new_distress_stops)
     ]
     
+    ; received distress message from region bus, so add distress stop
     if message_type =  "distress" [
       let new_stop item 1 message
       add-distress-stop new_stop
+      ;show (list "adding new distress stop " new_stop)
     ]
     
+    ; received welcome message containing colleagues, so add to list
     if message_type = "welcome" [
       let colleagues item 1 message
       add-colleagues colleagues
     ]
     
+    ; received message that a freestyler is initialized and ready to go, so send his id to other region leaders
     if message_type = "ready" [
       
       let initialized_freestyler item 1 message
@@ -561,6 +578,7 @@ to read-inbox
       send-to-leaders new_freestyler_message
     ]
     
+    ; received message that bus stop is claimed, so remove from distress stops
     if message_type = "claim" [
       let distress_stop item 1 message
 
@@ -568,13 +586,14 @@ to read-inbox
         let temp_pos position distress_stop distress_stops
         set distress_stops remove-item temp_pos distress_stops
       ]
+      ;show (list sender " claimed a distress stop: " distress_stop)
     ]
   ]
  
 end
 
 to send-to-freestylers [message]
-  
+  ;show (list "sending message to freestylers" message)
   foreach freestylers [
     let free_id ?
     send-message free_id message
@@ -582,7 +601,7 @@ to send-to-freestylers [message]
 end
 
 to send-to-leaders [message]
-  
+  ;show (list "sending message to leaders" message)
   foreach region_leader_ids [
     let ldr_id ?
     send-message ldr_id message
@@ -613,7 +632,7 @@ end
 
 
 to add-colleagues [colleagues]
-  
+  ;show (list "adding colleague" colleagues)
   foreach colleagues [
     if member? ? freestylers = false [
       set freestylers lput ? freestylers
@@ -629,7 +648,7 @@ to add-distress-stop [stress_stop]
 end
 
 to get-next-stop 
-  
+  ;show (list "adding next stop")
   ; get next stop on path and set it in next stop
   let path_length length path
   
@@ -639,6 +658,7 @@ to get-next-stop
       set next_stop nxt
     ]
     set path_position (path_position + 1) mod path_length
+    ;show (list "adding next stop " nxt " path is now " path " and new path_position " path_position)
   ]
   
 end
@@ -704,6 +724,7 @@ to-report drop-and-pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
       ]
     ] 
   ]
+  ;show (list "dropping off and picking up: " bus_passengers ", leaving: " still_at_stop)
   report still_at_stop
 end
 
@@ -719,12 +740,10 @@ to-report dijkstra [cur_stop claimed_stop]
   foreach shortest_path [
     ask ? [
       let id_temp bus_stop_name_to_id name
-      ; show (word "found path with dijkstra")
-      ; show (list name id_temp) 
       set path_temp lput id_temp path_temp
     ]
   ]
-
+  ;show (list "finding path between " cur_stop " and " claimed_stop " found path: " path_temp)
   report path_temp
 end
 
@@ -737,8 +756,7 @@ end
 ; ********************************************************************************************************************************************************************
 ;                                TODO
 ; ********************************************************************************************************************************************************************
-; is it alowed to say something like if bus = 24 init...
-; sometimes region buses go to some stop not on their path and get stuck, no idea why and only happens sometimes so hard to debug..
+; is it alowed to say something like if bus = 24 init...?
 
 ; TODO
 ; add voting on freestylers (optionally)
