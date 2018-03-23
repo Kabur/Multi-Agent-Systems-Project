@@ -1042,4 +1042,6 @@ end
 
 ; TODO
 ; add voting on freestylers (optionally)
+; smart way of deciding which bus size to add
+; problem with bus stops in noord
 ; note: when submitting final, change the color to what it was previously
