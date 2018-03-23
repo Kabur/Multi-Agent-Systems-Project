@@ -350,10 +350,10 @@ to actions-region-buses
 end
 
 to actions-freestyle-buses
-  show (list "bidding round" bidding_round)
+  ;show (list "bidding round" bidding_round)
   
   ifelse bidding_round = false [
-    show (list "distress stops" distress_stops)
+    ;show (list "distress stops" distress_stops)
     if length distress_stops > 0 [
       let stress_stop item 0 distress_stops
       let bid calculate-bid stress_stop
@@ -365,9 +365,9 @@ to actions-freestyle-buses
     ]
   ]
   [
-    show (list "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-    show (list "current bids " bids " my bid " current_bid " for stop " current_bid_stop)
-    show (list "for stops    " bids_stops)
+    ;show (list "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    ;show (list "current bids " bids " my bid " current_bid " for stop " current_bid_stop)
+    ;show (list "for stops    " bids_stops)
     let ctr 0
     let winning_bidder true
     foreach bids_stops [
@@ -385,7 +385,7 @@ to actions-freestyle-buses
         let claimed_stop item claimed_stop_idx distress_stops
         set traveling_to_signal true
         let claiming_message (list "claim" claimed_stop)
-        show (list "claiming distress stop: " claimed_stop)
+        ;show (list "claiming distress stop: " claimed_stop)
         send-to-freestylers claiming_message
         set distress_stops remove-item 0 distress_stops
         
@@ -401,7 +401,7 @@ to actions-freestyle-buses
             set path lput ? path
           ]
         ]
-        show (list "claimed stop so new path is " path)
+        ;show (list "claimed stop so new path is " path)
       ]
       
     ]
@@ -492,14 +492,14 @@ to actions-freestyle-buses
       ; drop&picking
       let passengers_left drop-and-pick current_stop bus_passengers bus_id get-capacity bus_type
       ifelse length passengers_left > 90 [
-        show (list "at bus stop " current_stop " " (length passengers_left) " are still waiting")
+       ; show (list "at bus stop " current_stop " " (length passengers_left) " are still waiting")
         let message (list "distress" current_stop "extra")
         ; send distress signal to freestylers
         send-to-freestylers message
       ]
       [
         if length passengers_left > 0 [
-          show (list "at bus stop " current_stop " " (length passengers_left) " are still waiting")
+          ;show (list "at bus stop " current_stop " " (length passengers_left) " are still waiting")
           let message (list "distress" current_stop "")
           ; send distress signal to freestylers
           send-to-freestylers message
@@ -568,8 +568,8 @@ to-report calculate-bid [to_stop]
   ; get path still to travel
   let path_length length path
   let path_left sublist path path_position path_length
-  show (word "---------------------------------------")
-  show (list "calculating bid for stop " to_stop)
+  ;show (word "---------------------------------------")
+ ; show (list "calculating bid for stop " to_stop)
   let distance_current_path get-path-distance path_left
   
   ; get path from last stop to distress stop
