@@ -16,33 +16,33 @@ buses-own [
   ; You can create any new local variable you want. Just declare them here.
   
   ; variables for all buses
-  inbox_position
-  path_type
-  path
-  spawn_counter
+  inbox_position  ; pointer denoting which messages are already read and which are unread
+  path_type       ; type of bus: can be fixed or free
+  path            ; list containing traveling path of bus
+  spawn_counter   ; counter that is set to zero each time a new bus is spawned and increments every tick, can only spawn new buses if counter is above some number (hyperpar)
   
   ; region leader variables, only these region leaders can spawn buses
-  init_later ; list of buses to initialize later but that are already spawned
-  latest_bus_id ; necessary for buses that can spawn to know which new bus is spawned
-  my_buses ; list of bus ids of busen in the leaders region (necessary for voting)
-  votes ; list with entry per bus from my_buses, entries can be 0 or 1 denoting no or yes vote
+  init_later      ; list of buses to initialize later but that are already spawned
+  latest_bus_id   ; necessary for buses that can spawn to know which new bus should be spawned
+  my_buses        ; list of bus ids of busen in the leaders region (necessary for voting)
+  votes           ; list with entry per bus from my_buses, entries can be 0 or 1 denoting no or yes vote
   region_leader_ids ; list with ids of region leaders to send messages to when spawning bus to let them know they should update their latest_bus_id
-  freestylers ; region leaders need list of 
+  freestylers     ; region leaders need list of freestylers to send them a message with the current distress stops and their colleague freestylers when they initialized
   
   ; region buses
-  path_position ; index of position in path of bus
-  region ; integer denoting region (1,2,3)
-  last_capacity ; capacity of bus when last voted
-  my_region_leader ; id of region leader to send votes to
+  path_position   ; index of position in path of bus
+  region          ; integer denoting region (1,2,3)
+  last_capacity   ; capacity of bus when last voted
+  my_region_leader; id of region leader to send votes to
   
   ; freestyle buses
-  distress_stops ; list of bus stops that are in 'distress' (people left at stop by buses)
-  traveling_to_signal
-  current_bid
-  current_bid_stop
-  bids
-  bids_stops
-  bidding_round ; can only bid once per tick
+  distress_stops  ; list of bus stops that are in 'distress' (people left at stop by buses)
+  traveling_to_signal ; signal that is true if a bus if traveling to a distress signal, false if he is not
+  current_bid     ; bus' current bid for a distress stop
+  current_bid_stop; bus' current stop he is bidding on
+  bids            ; list of bids from other buses (needed to check if own bid is the lowest)
+  bids_stops      ; list denoting which distress stop the bids from buses-own variable 'bids' are on (needed to know which bids to compare own bid with, should always bid on same stop)
+  bidding_round   ; can only bid once per tick so this bidding_round is set to true when a bus already bid in a round, reset to false after bids are compared (needed because there are several distress stops and can only bid on 1 in 1 tick)
 ]
  
 globals [graph]
@@ -65,7 +65,6 @@ globals [graph]
 ; ********************************************************************************************************************************************************************
 
 to init-buses
-  ;show (word "init")
   ; Initialize your agents here.
 
   ; This list contains the topology of the entire network of bus stops, which is known to all agents. You can use this, for instance, to calculate the shortest path between two bus stops.
@@ -105,8 +104,20 @@ to init-buses
   
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that initializes a bus according to several variables
+; the bus got this variables through an init message which was sent from function 'spawn', read from inbox and sent to this function
+; this init message contained all information the bus needed to initialize correctly
+; VARIABLES:
+; initial_path_type: denoting whether its a free or region bus
+; initial_region: which region it drives
+; initial_freestylers: what freestylers already exist in the system
+; my_leader: who is my region leader
+; current_leaders: what are the current other leaders
+; leader: a bool denoting if I should be a leader
 to initialize-bus [initial_path_type initial_region initial_freestylers my_leader current_leaders leader]
-  ;show (word "init2")
   
   ; set variables necessary for all buses
   set path_type initial_path_type
@@ -115,6 +126,7 @@ to initialize-bus [initial_path_type initial_region initial_freestylers my_leade
   set bids_stops n-values (length freestylers) [-1]
   set my_region_leader my_leader
   
+  ; if path type is fixed, set route, region and color
   ifelse initial_path_type = "fixed" [
     let capacity get-capacity bus_type
     set last_capacity capacity
@@ -136,6 +148,8 @@ to initialize-bus [initial_path_type initial_region initial_freestylers my_leade
       set region 3
       set color red
     ]
+    
+    ; if bus is a leader
     if leader = true [
       
       ; add old leaders to my variable
@@ -157,7 +171,10 @@ to initialize-bus [initial_path_type initial_region initial_freestylers my_leade
       ]
     ]
   ]
+  ; if path type is free
   [
+    
+    ; send message to a leader that I am ready initializing and color me pink
     let message (list "ready" bus_id)
     set traveling_to_signal false
     send-message my_region_leader message
@@ -165,6 +182,18 @@ to initialize-bus [initial_path_type initial_region initial_freestylers my_leade
   ]
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that spawns new buses based on several variables
+; VARIABLES:
+; new_id: id of bus to spawn
+; initial_path_type: fixed or free
+; initial_region: 1,2,3 or -1 if not fixed
+; current_freestylers: list of freestyler buses already in system
+; leader_bool: boolean thats true if a leader has to be spawned, false otherwise
+; current_leaders: list of current leaders in system
+; leader_id: bus id of region leader for new bus
 to-report spawn [new_id initial_path_type initial_region current_freestylers leader_bool current_leaders leader_id]
   ; initial_path_type = "fixed" or "freestyler"
   ; initial_region = numbers from 1 to 3 if fixed; [] if freestyler
@@ -195,7 +224,10 @@ to-report spawn [new_id initial_path_type initial_region current_freestylers lea
   
 end
 
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function loops over buses that have to be initialized in the variable init_later and sends these buses init messages
 to resolve-spawning
   
   ; if there are buses to be spawned
@@ -216,6 +248,12 @@ to resolve-spawning
    
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that spawns region leaders with their correct settings of variables by adding them to the list to initialize later ('init_later')
+; VARIABLES:
+; no: region to spawn leader for (1,2 or 3)
 to spawn-region-leaders [no]
   
   ; spawn the remaining 2 region buses at the beginning
@@ -226,6 +264,13 @@ to spawn-region-leaders [no]
   
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that spawns new region leaders with their correct settings of variables by adding them to the list to initialize later ('init_later')
+; VARIABLES:
+; region_num: region the bus will drive
+; my_leader: id of the region leader for the bus
 to spawn-region-buses [region_num my_leader]
   
   set my_buses lput (latest_bus_id + 1) my_buses
@@ -235,6 +280,15 @@ to spawn-region-buses [region_num my_leader]
   
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that spawns new freestyle buses with their correct settings of variables by adding them to the list to initialize later ('init_later')
+; VARIABLES:
+; region_leader: id of region_leader 
+; (needed because the new free bus will send the region leader a message when he is ready initializing (after function initialize-bus) 
+; after which the region leader will let him know what the currect distress stops are and who his colleagues are, which is needed because in one tick multiple region leaders can spawn free buses)
+; current_freestylers: list of current_freestylers
 to spawn-freestyle-buses [region_leader current_freestylers]
   
   let freestyle_bus spawn (latest_bus_id + 1) "free" -1 [] false current_freestylers region_leader
@@ -323,6 +377,10 @@ to execute-actions
   set spawn_counter spawn_counter + 1  
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that executes all actions for region buses
 to actions-region-buses
   ;show (word "exec region")
   ; drop people off and pick people up
@@ -349,6 +407,10 @@ to actions-region-buses
   ]
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that executes all actions for freestyle buses
 to actions-freestyle-buses
   ;show (list "bidding round" bidding_round)
   
@@ -517,9 +579,16 @@ end
 ;                                VOTING FUNCTIONS
 ; ********************************************************************************************************************************************************************
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that casts a vote for a region bus
 to cast-vote
-  ;show (word "vote")
+  
+  ; set threshold for a yes vote (hyperpar)
   let voting_threshold 10
+  
+  ; calculate empty seats in bus
   let capacity get-capacity bus_type
   let current_passengers length bus_passengers
   let empty_seats capacity - current_passengers
@@ -542,10 +611,15 @@ to cast-vote
   ]
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that counts votes (only region leaders use this function)
 to count-votes
   let yes_votes sum votes
   let no_votes length votes - yes_votes
   
+  ; spawn a new bus if there are at least as many yes votes as there are no votes
   if yes_votes >= no_votes  and spawn_counter >= 30 [
     spawn-region-buses region bus_id
     set spawn_counter 0
@@ -557,19 +631,29 @@ end
 ;                                BIDDING FUNCTIONS
 ; ********************************************************************************************************************************************************************
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that bids a certain value for a distress stop by sending a message to all freestylers with the bid
+; VARIABLES
+; bid: float representing the bid for a stop
+; stress_stop: the stop the bus is bidding on
 to bidding [bid stress_stop]
   let bidding_message (list "bid" bid stress_stop)
-  ;show (list "bidding message " bidding_message)
   send-to-freestylers bidding_message
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that calculates a bid for a certain stop based on the distance to that stop
+; VARIABLES:
+; to_stop: distress stop that the bid will be on
 to-report calculate-bid [to_stop]
   
   ; get path still to travel
   let path_length length path
   let path_left sublist path path_position path_length
-  ;show (word "---------------------------------------")
- ; show (list "calculating bid for stop " to_stop)
   let distance_current_path get-path-distance path_left
   
   ; get path from last stop to distress stop
@@ -677,7 +761,6 @@ to read-inbox
       
       let new_distress_stops item 1 message
       set distress_stops new_distress_stops
-      ;show (list "adding distress stops for the first time: " new_distress_stops)
     ]
     
     ; received distress message from region bus, so add distress stop
@@ -685,7 +768,6 @@ to read-inbox
       let new_stop item 1 message
       let extra item 2 message
       add-distress-stop new_stop extra
-      ;show (list "adding new distress stop " new_stop)
     ]
     
     ; received welcome message containing colleagues, so add to list
@@ -710,24 +792,25 @@ to read-inbox
         let temp_pos position distress_stop distress_stops
         set distress_stops remove-item temp_pos distress_stops
       ]
-      ;show (list sender " claimed a distress stop: " distress_stop)
     ]
     
+    ; received a bid, update bids variable accordingly
     if message_type = "bid" [
+      
+      ; get bid and stop it is on
       let bid item 1 message
       let stress_stop item 2 message
-      ;show (list "received bid" bid)
+      
+      ; find idx of bus that sent bid and change his bid in the list
       let bidding_idx position sender freestylers
       set bids replace-item bidding_idx bids bid
       set bids_stops replace-item bidding_idx bids_stops stress_stop
-      ;show (list "received from " sender " my freestylers list is " freestylers " so his idx is " bidding_idx " in bidding list " bids " my bid is " current_bid)
     ]
   ]
  
 end
 
 to send-to-freestylers [message]
-  ;show (list "sending message to freestylers" message)
   foreach freestylers [
     let free_id ?
     send-message free_id message
@@ -735,7 +818,6 @@ to send-to-freestylers [message]
 end
 
 to send-to-leaders [message]
-  ;show (list "sending message to leaders" message)
   foreach region_leader_ids [
     let ldr_id ?
     send-message ldr_id message
@@ -747,6 +829,12 @@ end
 ;                                HELPER FUNCTIONS
 ; ********************************************************************************************************************************************************************
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that calculates the distance of a route
+; VARIABLES:
+; travel_path: list of stops representing a path / route
 to-report get-path-distance [travel_path]
   let total_distance 0
   let idx 1
@@ -763,6 +851,12 @@ to-report get-path-distance [travel_path]
   report total_distance
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that calculates distance of current stop to a destionation
+; VARIABLES:
+; dest_stop: bus stops denoting destination
 to-report get-distance-to-current-stop [dest_stop]
   let temp_dist 0
   ask bus_stop current_stop [ set temp_dist distance id-to-bus-stop dest_stop]
@@ -781,8 +875,13 @@ to-report id-to-bus-stop [temp_id]
 end
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that adds freestyle bus ids to buses-own variable 'freestylers' and adds a slot in buses-own variables 'bids' and 'bids_stops' for each
+; VARIABLES:
+; colleagues: list of freestyle colleagues
 to add-colleagues [colleagues]
-  ;show (list "adding colleague" colleagues)
   foreach colleagues [
     if member? ? freestylers = false [
       set freestylers lput ? freestylers
@@ -792,6 +891,13 @@ to add-colleagues [colleagues]
   ]
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that adds a distress stop to the list if its not already there or moves the stop to the front if it is extra crowded
+; VARIABLES:
+; stress_stop: bus stop to add
+; extra: string denoting whether or not the stop should be moved to the front (if there are more than 90 people waiting)
 to add-distress-stop [stress_stop extra]
   
   ifelse member? stress_stop distress_stops = false [
@@ -813,8 +919,11 @@ to add-distress-stop [stress_stop extra]
   ]
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that gets next stop in list path, puts it in buses-own variable 'next_stop' and updates path_position accordingly
 to get-next-stop 
-  ;show (list "adding next stop")
   ; get next stop on path and set it in next stop
   let path_length length path
   
@@ -847,6 +956,14 @@ to-report get-capacity [bs_type]
   report capacity
 end
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; function that drops people off and picks new people up ONLY IF: people are on the path of the bus (future path if bus is freestyler)
+; VARIABLES:
+; cur_bus_stop: current bus stop
+; cur_bus_passengers: current passengers in bus
+; capacity: current capacity
 to-report drop-and-pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
   
   ; current number of passengers
@@ -890,7 +1007,6 @@ to-report drop-and-pick [cur_bus_stop cur_bus_passengers cur_bus_id capacity]
       ]
     ] 
   ]
-  ;show (list "dropping off and picking up: " bus_passengers ", leaving: " still_at_stop)
   report still_at_stop
 end
 
@@ -926,5 +1042,4 @@ end
 
 ; TODO
 ; add voting on freestylers (optionally)
-; add bidding for distress stops
 ; note: when submitting final, change the color to what it was previously
