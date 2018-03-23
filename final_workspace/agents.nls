@@ -60,6 +60,7 @@ globals [graph]
 ; ********************************************************************************************************************************************************************
 
 to init-buses
+  show (word "init")
   ; Initialize your agents here.
 
   ; This list contains the topology of the entire network of bus stops, which is known to all agents. You can use this, for instance, to calculate the shortest path between two bus stops.
@@ -95,6 +96,7 @@ to init-buses
 end
 
 to initialize-bus [initial_path_type initial_region initial_freestylers my_leader current_leaders leader]
+  show (word "init2")
   
   ; set variables necessary for all buses
   set path_type initial_path_type
@@ -234,6 +236,8 @@ end
 ; ********************************************************************************************************************************************************************
 
 to execute-actions
+  show (word "exec")
+  
   ; Add decision making strategies for your agents here.
   ; You are allowed to use the global variable 'ticks'.
   
@@ -263,7 +267,7 @@ to execute-actions
     ]    
   ]
   [
-    if next_stop != -1 [
+    if next_stop != -1 and path_type != "uninitialized" [
       travel-to next_stop
     ]
   ]
@@ -320,7 +324,7 @@ to actions-region-buses
   
   ; get next stop and travel to it
   get-next-stop
-  if next_stop != -1 [
+  if next_stop != -1 and path_type != "uninitialized" [
     travel-to next_stop
   ]
 end
@@ -361,7 +365,7 @@ to actions-freestyle-buses
       
       get-next-stop
       
-      if next_stop != -1 [  
+      if next_stop != -1 and path_type != "uninitialized" [  
         travel-to next_stop
       ]
 
@@ -414,7 +418,7 @@ to actions-freestyle-buses
       ]
       
       get-next-stop
-      if next_stop != -1 [  
+      if next_stop != -1 and path_type != "uninitialized" [  
         travel-to next_stop
       ]
     ]
@@ -464,6 +468,7 @@ end
 ; ********************************************************************************************************************************************************************
 
 to read-inbox
+  show (word "reading inbox")
   
   let inbox_length length inbox
   
@@ -488,6 +493,7 @@ to read-inbox
     ; initialize buses
     if message_type = "init" [
       ; item 1 is initial_path_type, item 2 is initial_region, item 3 is initial distress stops, item 4 is boolean determining if someone is a region leader
+      show (list "initial path type" (item 1 message))
       initialize-bus item 1 message item 2 message item 3 message item 4 message item 5 message item 6 message
     ]
     
