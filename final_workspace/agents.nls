@@ -38,6 +38,11 @@ buses-own [
   ; freestyle buses
   distress_stops ; list of bus stops that are in 'distress' (people left at stop by buses)
   traveling_to_signal
+  current_bid
+  current_bid_stop
+  bids
+  bids_stops
+  bidding_round ; can only bid once per tick
 ]
  
 globals [graph]
@@ -92,6 +97,11 @@ to init-buses
   
   ; initial variables freestyle buses
   set distress_stops []
+  set bids []
+  set bids_stops []
+  set bidding_round false
+  set current_bid 1000000
+  set current_bid_stop -1
   
 end
 
@@ -101,6 +111,8 @@ to initialize-bus [initial_path_type initial_region initial_freestylers my_leade
   ; set variables necessary for all buses
   set path_type initial_path_type
   set freestylers initial_freestylers
+  set bids n-values (length freestylers) [1000000]
+  set bids_stops n-values (length freestylers) [-1]
   set my_region_leader my_leader
   
   ifelse initial_path_type = "fixed" [
@@ -318,12 +330,18 @@ to actions-region-buses
   let people_left_at_stop drop-and-pick current_stop bus_passengers bus_id capacity
   
   ; if there were people left, send a distress signal
-  if length people_left_at_stop > 0 [
-    let message (list "distress" current_stop)
+  ifelse length people_left_at_stop > 90 [
+    let message (list "distress" current_stop "extra")
     ; send distress signal to freestylers
     send-to-freestylers message
   ]
-  
+  [
+    if length people_left_at_stop > 0 [
+      let message (list "distress" current_stop "")
+      ; send distress signal to freestylers
+      send-to-freestylers message
+    ]
+  ]
   ; get next stop and travel to it
   get-next-stop
   if next_stop != -1 and path_type != "uninitialized" [
@@ -332,8 +350,68 @@ to actions-region-buses
 end
 
 to actions-freestyle-buses
-  ;show (word "exec freestylers")
+  show (list "bidding round" bidding_round)
   
+  ifelse bidding_round = false [
+    show (list "distress stops" distress_stops)
+    if length distress_stops > 0 [
+      let stress_stop item 0 distress_stops
+      let bid calculate-bid stress_stop
+      bidding bid stress_stop
+      ;show (list "bid from " bus_id " is " bid " because path is " path " path position is " path_position " and distress stop is " stress_stop)
+      set current_bid bid
+      set current_bid_stop stress_stop
+      set bidding_round true
+    ]
+  ]
+  [
+    show (list "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    show (list "current bids " bids " my bid " current_bid " for stop " current_bid_stop)
+    show (list "for stops    " bids_stops)
+    let ctr 0
+    let winning_bidder true
+    foreach bids_stops [
+      if current_bid_stop = ? [
+        let his_bid item ctr bids
+        if his_bid < current_bid [
+          set winning_bidder false
+        ]
+      ]
+      set ctr ctr + 1
+    ]
+    if winning_bidder = true and length distress_stops > 0 [
+      let claimed_stop_idx position current_bid_stop distress_stops
+      if claimed_stop_idx != false [
+        let claimed_stop item claimed_stop_idx distress_stops
+        set traveling_to_signal true
+        let claiming_message (list "claim" claimed_stop)
+        show (list "claiming distress stop: " claimed_stop)
+        send-to-freestylers claiming_message
+        set distress_stops remove-item 0 distress_stops
+        
+        ; dijkstra
+        ifelse length path = 0 [
+          set path dijkstra current_stop claimed_stop
+        ]
+        [
+          let last_stop last path
+          let temp_path dijkstra last_stop claimed_stop
+          set temp_path remove-item 0 temp_path
+          foreach temp_path [
+            set path lput ? path
+          ]
+        ]
+        show (list "claimed stop so new path is " path)
+      ]
+      
+    ]
+    let n_bidders length bids
+    set bids n-values n_bidders [1000000]
+    set bids_stops n-values (length freestylers) [-1]
+    set bidding_round false
+  ]
+    
+    
   ; if we were not following a distress signal(but rather transferring people from a signal), react to a signal
     ; Freestyler actions after dropping and picking people 
     ifelse traveling_to_signal = false [
@@ -344,27 +422,20 @@ to actions-freestyle-buses
       ; if there are stops in distress and you finished your path, claim a stop
       ; if we are NOT at the end of our path, just continue to the next stop
       if length distress_stops > 0 and length path - 1 <= path_position [ ;note: length path = 0 when we just initialized this guy
-        set traveling_to_signal true
+        
         set path_position 0
-        let claimed_stop item 0 distress_stops
         
-        let claiming_message (list "claim" claimed_stop)
-        ;show (list "claiming distress stop: " claimed_stop)
-        send-to-freestylers claiming_message
-        set distress_stops remove-item 0 distress_stops
-        
-        ; dijkstra
-        set path dijkstra current_stop claimed_stop
-
-        if item 0 path = current_stop [
-          set path remove-item 0 path
-          if length path = 0 [
-            set traveling_to_signal false
+        if length path > 0 [
+          if item 0 path = current_stop [
+            set path remove-item 0 path
+            if length path = 0 [
+              set traveling_to_signal false
+            ]
           ]
+          ; drop&picking with respect to the new path
+          let void drop-and-pick current_stop bus_passengers bus_id get-capacity bus_type
         ]
         
-        ; drop&picking with respect to the new path
-        let void drop-and-pick current_stop bus_passengers bus_id get-capacity bus_type
       ]
       
       get-next-stop
@@ -419,7 +490,21 @@ to actions-freestyle-buses
       ]
       
       ; drop&picking
-      let void drop-and-pick current_stop bus_passengers bus_id get-capacity bus_type
+      let passengers_left drop-and-pick current_stop bus_passengers bus_id get-capacity bus_type
+      ifelse length passengers_left > 90 [
+        show (list "at bus stop " current_stop " " (length passengers_left) " are still waiting")
+        let message (list "distress" current_stop "extra")
+        ; send distress signal to freestylers
+        send-to-freestylers message
+      ]
+      [
+        if length passengers_left > 0 [
+          show (list "at bus stop " current_stop " " (length passengers_left) " are still waiting")
+          let message (list "distress" current_stop "")
+          ; send distress signal to freestylers
+          send-to-freestylers message
+        ]
+      ]
       
       get-next-stop
       if next_stop != -1 and path_type != "uninitialized" [  
@@ -465,6 +550,40 @@ to count-votes
     spawn-region-buses region bus_id
     set spawn_counter 0
   ]
+end
+
+
+; ********************************************************************************************************************************************************************
+;                                BIDDING FUNCTIONS
+; ********************************************************************************************************************************************************************
+
+to bidding [bid stress_stop]
+  let bidding_message (list "bid" bid stress_stop)
+  ;show (list "bidding message " bidding_message)
+  send-to-freestylers bidding_message
+end
+
+to-report calculate-bid [to_stop]
+  
+  ; get path still to travel
+  let path_length length path
+  let path_left sublist path path_position path_length
+  show (word "---------------------------------------")
+  show (list "calculating bid for stop " to_stop)
+  let distance_current_path get-path-distance path_left
+  
+  ; get path from last stop to distress stop
+  let last_stop current_stop
+  if length path > 0 [
+    set last_stop last path
+  ]
+  let new_path dijkstra last_stop to_stop
+  let distance_distress_path get-path-distance new_path
+  
+  ; calc bid
+  let bid distance_current_path + distance_distress_path
+  
+  report bid
 end
 
 ; ********************************************************************************************************************************************************************
@@ -530,6 +649,8 @@ to read-inbox
       
       ; update own list
       set freestylers lput free_id freestylers
+      set bids lput 1000000 bids
+      set bids_stops lput -1 bids_stops
     ]
     
     ; received message that I have a new colleague freestyler, so add to the list
@@ -541,6 +662,8 @@ to read-inbox
       ; add him to my list of freestylers
       if member? colleague_id freestylers = false [
         set freestylers lput colleague_id freestylers
+        set bids lput 1000000 bids
+        set bids_stops lput -1 bids_stops
       ]
       
       ; notify the new freestyler of the current stops in distress
@@ -560,7 +683,8 @@ to read-inbox
     ; received distress message from region bus, so add distress stop
     if message_type =  "distress" [
       let new_stop item 1 message
-      add-distress-stop new_stop
+      let extra item 2 message
+      add-distress-stop new_stop extra
       ;show (list "adding new distress stop " new_stop)
     ]
     
@@ -588,6 +712,16 @@ to read-inbox
       ]
       ;show (list sender " claimed a distress stop: " distress_stop)
     ]
+    
+    if message_type = "bid" [
+      let bid item 1 message
+      let stress_stop item 2 message
+      ;show (list "received bid" bid)
+      let bidding_idx position sender freestylers
+      set bids replace-item bidding_idx bids bid
+      set bids_stops replace-item bidding_idx bids_stops stress_stop
+      ;show (list "received from " sender " my freestylers list is " freestylers " so his idx is " bidding_idx " in bidding list " bids " my bid is " current_bid)
+    ]
   ]
  
 end
@@ -613,6 +747,22 @@ end
 ;                                HELPER FUNCTIONS
 ; ********************************************************************************************************************************************************************
 
+to-report get-path-distance [travel_path]
+  let total_distance 0
+  let idx 1
+  foreach travel_path [
+    if idx < length travel_path [
+      
+      let nxt_stop item idx travel_path
+      let new_distance get-distance ? nxt_stop
+      set total_distance total_distance + new_distance
+    ]
+    
+    set idx idx + 1
+  ]
+  report total_distance
+end
+
 to-report get-distance-to-current-stop [dest_stop]
   let temp_dist 0
   ask bus_stop current_stop [ set temp_dist distance id-to-bus-stop dest_stop]
@@ -636,14 +786,30 @@ to add-colleagues [colleagues]
   foreach colleagues [
     if member? ? freestylers = false [
       set freestylers lput ? freestylers
+      set bids lput 1000000 bids
+      set bids_stops lput -1 bids_stops
     ]
   ]
 end
 
-to add-distress-stop [stress_stop]
+to add-distress-stop [stress_stop extra]
   
-  if member? stress_stop distress_stops = false [
-    set distress_stops lput stress_stop distress_stops
+  ifelse member? stress_stop distress_stops = false [
+    
+    ifelse extra = "extra" [
+      set distress_stops lput stress_stop distress_stops
+    ]
+    [
+      set distress_stops fput stress_stop distress_stops
+    ]
+  ]
+  [
+    ; if already in list but extra then move to front because a lot of people are waiting there
+    if extra = "extra" [
+      let current_idx_stop position stress_stop distress_stops
+      set distress_stops remove-item current_idx_stop distress_stops
+      set distress_stops fput stress_stop distress_stops
+    ]
   ]
 end
 
